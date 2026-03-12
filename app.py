@@ -53,11 +53,17 @@ def main() -> None:
     st.sidebar.title("📈 美股選股")
     st.sidebar.markdown("---")
 
+    _PAGES = ["📡 總體市場 (Macro)", "🔬 個股診斷 (Micro)", "💼 我的持倉"]
+    _nav   = st.session_state.get("nav_page", _PAGES[0])
+    _idx   = _PAGES.index(_nav) if _nav in _PAGES else 0
+
     page = st.sidebar.radio(
         "功能選擇",
-        ["📡 總體市場 (Macro)", "🔬 個股診斷 (Micro)", "💼 我的持倉"],
-        key="page",
+        _PAGES,
+        index=_idx,
+        key="page_radio",
     )
+    st.session_state["nav_page"] = page
 
     # Portfolio badge + quick export in sidebar
     portfolio = st.session_state.get("portfolio", {})
@@ -177,7 +183,7 @@ def main() -> None:
                     st.session_state["diag_stock_info"]  = None
                     st.session_state["diag_hist"]        = None
                     st.session_state["auto_fetch"]       = True
-                    st.session_state["page"]             = "🔬 個股診斷 (Micro)"
+                    st.session_state["nav_page"]         = "🔬 個股診斷 (Micro)"
                     st.rerun()
             if col_rm.button("✕", key=f"wl_rm_{wl_ticker}"):
                 st.session_state["watchlist"].remove(wl_ticker)

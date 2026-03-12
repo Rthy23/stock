@@ -46,7 +46,7 @@ def init_session() -> None:
             "diag_hist":      lambda: None,
             "diag_period":    lambda: "1y",
             "auto_fetch":     lambda: False,
-            "page":           lambda: "📡 總體市場 (Macro)",
+            "nav_page":       lambda: "📡 總體市場 (Macro)",
             "benchmark":      lambda: "VOO",
         }
         for key, factory in defaults.items():
@@ -64,7 +64,7 @@ def navigate_to_diagnosis(stock_info: dict) -> None:
         st.session_state["diag_stock_info"]  = stock_info
         st.session_state["diag_hist"]        = None
         st.session_state["auto_fetch"]       = True
-        st.session_state["page"]             = "🔬 個股診斷 (Micro)"
+        st.session_state["nav_page"]         = "🔬 個股診斷 (Micro)"
         st.rerun()
     except Exception as e:
         print(_err("navigate_to_diagnosis", e))
@@ -915,7 +915,7 @@ def render_portfolio_dashboard() -> None:
             st.session_state["diag_stock_info"]  = None
             st.session_state["diag_hist"]        = None
             st.session_state["auto_fetch"]       = True
-            st.session_state["page"]             = "🔬 個股診斷 (Micro)"
+            st.session_state["nav_page"]         = "🔬 個股診斷 (Micro)"
             st.rerun()
 
         rcols[1].markdown(
