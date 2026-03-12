@@ -17,7 +17,7 @@ st.set_page_config(
 
 from analysis import (
     compute_technicals, screen_stocks, format_market_cap,
-    calc_buy_zone, calc_exit_strategy,
+    calc_buy_zone, calc_exit_strategy, classify_investment_horizon,
     plot_relative_strength, plot_four_quadrant,
 )
 from data_fetcher import (
@@ -674,6 +674,61 @@ def main() -> None:
                     st.error(f"⚠️ 交易計畫計算異常：{_e2}")
             else:
                 st.warning("⚠️ 無法獲取歷史數據，無法計算技術指標。")
+
+            # Section 2b: Investment Horizon Classification
+            st.markdown("---")
+            st.markdown("### 🧭 投資屬性分類")
+            try:
+                _sma50_h, _sma200_h, _ = compute_technicals(hist) if hist is not None and not hist.empty else (None, None, None)
+                _hz = classify_investment_horizon(price, _sma50_h, _sma200_h, hist)
+                _acc = _hz["accent"]
+                _bg  = _hz["bg"]
+                _bdr = _hz["border"]
+                _bullet_html = "".join(
+                    f"<li style='margin:5px 0; font-size:13px; color:#ccc;'>{r}</li>"
+                    for r in _hz["reasons"]
+                )
+                st.markdown(
+                    f"""
+                    <div style="
+                        background:{_bg};
+                        border-left:4px solid {_bdr};
+                        border-radius:8px;
+                        padding:18px 22px;
+                        margin-top:4px;
+                    ">
+                      <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+                        <span style="font-size:28px; line-height:1;">{_hz["icon"]}</span>
+                        <div>
+                          <div style="font-size:13px; color:#aaa; letter-spacing:.5px; margin-bottom:2px;">
+                            投資屬性分類
+                          </div>
+                          <div style="font-size:20px; font-weight:700; color:{_acc};">
+                            {_hz["label"]}
+                          </div>
+                        </div>
+                      </div>
+                      <div style="
+                          background:#ffffff12;
+                          border-radius:6px;
+                          padding:9px 14px;
+                          margin-bottom:12px;
+                          font-size:13px;
+                          color:{_acc};
+                          font-weight:600;
+                          letter-spacing:.3px;
+                      ">
+                        🗓 {_hz["hold_period"]}
+                      </div>
+                      <ul style="margin:0; padding-left:20px; list-style:disc;">
+                        {_bullet_html}
+                      </ul>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            except Exception as _e_hz:
+                st.warning(f"⚠️ 投資屬性分類計算異常：{_e_hz}")
 
             # Section 3: K-line chart
             if hist is not None and not hist.empty:
