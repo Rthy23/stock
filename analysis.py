@@ -108,7 +108,7 @@ def sentiment_badge(sentiment: str) -> str:
     }
     color, bg, label = colors.get(sentiment, colors["neutral"])
     return (f'<span style="background:{bg}; color:{color}; border:1px solid {color}44;'
-            f' border-radius:4px; padding:2px 8px; font-size:11px;'
+            f' border-radius:4px; padding:2px 8px; font-size:13px;'
             f' font-weight:600; white-space:nowrap;">{label}</span>')
 
 
@@ -336,28 +336,28 @@ def plot_four_quadrant(
         fig.add_annotation(
             x=max_r * 0.55, y=max_a * 0.78,
             text="🚀 強勢上升<br><b>建議加倉</b>",
-            font=dict(color="#00FF7F", size=9),
+            font=dict(color="#00FF7F", size=12),
             showarrow=False,
             bgcolor="rgba(0,0,0,0.5)",
         )
         fig.add_annotation(
             x=-max_r * 0.55, y=max_a * 0.78,
             text="💪 抗跌強勢<br><b>可以持有</b>",
-            font=dict(color="#00D4FF", size=9),
+            font=dict(color="#00D4FF", size=12),
             showarrow=False,
             bgcolor="rgba(0,0,0,0.5)",
         )
         fig.add_annotation(
             x=-max_r * 0.55, y=-max_a * 0.78,
             text="⚠️ 補跌弱勢<br><b>考慮止損</b>",
-            font=dict(color="#FF4B4B", size=9),
+            font=dict(color="#FF4B4B", size=12),
             showarrow=False,
             bgcolor="rgba(0,0,0,0.5)",
         )
         fig.add_annotation(
             x=max_r * 0.55, y=-max_a * 0.78,
             text="🔍 弱勢反彈<br><b>謹慎觀望</b>",
-            font=dict(color="#FFD700", size=9),
+            font=dict(color="#FFD700", size=12),
             showarrow=False,
             bgcolor="rgba(0,0,0,0.5)",
         )
@@ -388,14 +388,14 @@ def plot_four_quadrant(
         fig.update_layout(
             title=dict(text="四象限強弱矩陣", font=dict(size=12, color="#fff")),
             xaxis=dict(
-                title=dict(text=f"{stock_ticker} 期間報酬 (%)", font=dict(color="#aaa", size=10)),
+                title=dict(text=f"{stock_ticker} 期間報酬 (%)", font=dict(color="#aaa", size=12)),
                 range=[-max_r, max_r], showgrid=False, zeroline=False,
-                tickfont=dict(color="#aaa", size=9), ticksuffix="%",
+                tickfont=dict(color="#aaa", size=12), ticksuffix="%",
             ),
             yaxis=dict(
-                title=dict(text="超額 Alpha (%)", font=dict(color="#aaa", size=10)),
+                title=dict(text="超額 Alpha (%)", font=dict(color="#aaa", size=12)),
                 range=[-max_a, max_a], showgrid=False, zeroline=False,
-                tickfont=dict(color="#aaa", size=9), ticksuffix="%",
+                tickfont=dict(color="#aaa", size=12), ticksuffix="%",
             ),
             paper_bgcolor="#0E1117", plot_bgcolor="#12151F",
             font=dict(color="#fff"), height=340,

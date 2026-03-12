@@ -119,7 +119,7 @@ def zone_progress_bar(pct_position, buy_lower, buy_upper, price) -> None:
             </div>
           </div>
           <div style="display:flex; justify-content:space-between;
-                      color:#555; font-size:11px; margin-top:4px;">
+                      color:#555; font-size:13px; margin-top:4px;">
             <span>強力支撐區</span>
             <span>理想買入區</span>
             <span>偏高區域</span>
@@ -218,7 +218,7 @@ def plot_price_chart(
                         "📕 <b style='color:#FF4B4B'>陰線</b>（收 < 開，紅色）　"
                         "— SMA50（金）　·· SMA200（橙）"
                     ),
-                    font=dict(size=10, color="#888"),
+                    font=dict(size=12, color="#888"),
                     align="left",
                     xanchor="left",
                 ),
@@ -261,7 +261,7 @@ def plot_volume_chart(ticker: str, hist: pd.DataFrame) -> tuple:
         fig.add_annotation(
             x=hist.index[-1], y=last_vol, text=flag_text,
             showarrow=True, arrowhead=2, arrowcolor=flag_color,
-            font=dict(color=flag_color, size=10),
+            font=dict(color=flag_color, size=12),
             bgcolor="rgba(0,0,0,0.7)", ax=-60, ay=-40,
         )
         fig.update_layout(
@@ -283,7 +283,7 @@ def plot_volume_chart(ticker: str, hist: pd.DataFrame) -> tuple:
                         "🔴 <b style='color:#FF4B4B'>紅色柱</b>：當日陰線成交（收 < 開）　"
                         "— <b style='color:#FFD700'>黃線</b>：20日均量"
                     ),
-                    font=dict(size=10, color="#888"),
+                    font=dict(size=12, color="#888"),
                     align="left",
                     xanchor="left",
                 ),
@@ -330,8 +330,8 @@ def plot_analyst_targets(
             ),
             xaxis=dict(range=[axis_min, axis_max], tickprefix="$",
                        showgrid=True, gridcolor="#1E2130",
-                       tickfont=dict(color="#aaa", size=10)),
-            yaxis=dict(tickfont=dict(color="#aaa", size=10)),
+                       tickfont=dict(color="#aaa", size=12)),
+            yaxis=dict(tickfont=dict(color="#aaa", size=12)),
             paper_bgcolor="#0E1117", plot_bgcolor="#0E1117",
             height=140, margin=dict(t=48, b=30, l=90, r=20), showlegend=False,
         )
@@ -374,12 +374,12 @@ def plot_analyst_recs(recs_df: pd.DataFrame) -> go.Figure:
             title=dict(text="分析師評級歷史（近期各月）",
                        font=dict(size=12, color="#fff")),
             barmode="stack",
-            xaxis=dict(tickfont=dict(color="#aaa", size=10)),
-            yaxis=dict(title=dict(text="分析師數", font=dict(color="#aaa", size=10)),
-                       tickfont=dict(color="#aaa", size=10),
+            xaxis=dict(tickfont=dict(color="#aaa", size=12)),
+            yaxis=dict(title=dict(text="分析師數", font=dict(color="#aaa", size=12)),
+                       tickfont=dict(color="#aaa", size=12),
                        showgrid=True, gridcolor="#1E2130"),
             paper_bgcolor="#0E1117", plot_bgcolor="#0E1117",
-            legend=dict(font=dict(color="#aaa", size=10),
+            legend=dict(font=dict(color="#aaa", size=12),
                         orientation="h", yanchor="bottom", y=1.02),
             height=260, margin=dict(t=55, b=30, l=50, r=20),
         )
@@ -485,7 +485,7 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
                         border-radius:10px; padding:16px; text-align:center;">
               <div style="color:#aaa; font-size:12px; margin-bottom:4px;">🟢 建議買入上限</div>
               <div style="color:#00FF7F; font-size:22px; font-weight:700;">${buy_limit:.2f}</div>
-              <div style="color:#666; font-size:11px;">(SMA 50)</div>
+              <div style="color:#666; font-size:13px;">(SMA 50)</div>
             </div>""", unsafe_allow_html=True)
         with c2:
             if stop:
@@ -494,7 +494,7 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
                             border-radius:10px; padding:16px; text-align:center;">
                   <div style="color:#aaa; font-size:12px; margin-bottom:4px;">🔴 建議止損價</div>
                   <div style="color:#FF4B4B; font-size:22px; font-weight:700;">${stop:.2f}</div>
-                  <div style="color:#666; font-size:11px;">(SMA200 × 97% 或 20日低 × 98%)</div>
+                  <div style="color:#666; font-size:13px;">(SMA200 × 97% 或 20日低 × 98%)</div>
                 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown("資料不足")
@@ -505,7 +505,7 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
                             border-radius:10px; padding:16px; text-align:center;">
                   <div style="color:#aaa; font-size:12px; margin-bottom:4px;">🎯 預計目標價</div>
                   <div style="color:#00D4FF; font-size:22px; font-weight:700;">${target:.2f}</div>
-                  <div style="color:#666; font-size:11px;">(買入點盈虧比 1:2)</div>
+                  <div style="color:#666; font-size:13px;">(買入點盈虧比 1:2)</div>
                 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown("資料不足")
@@ -534,9 +534,9 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
                     st.markdown(f"""
                     <div style="background:#1A1D2E; border:1px solid #444;
                                 border-radius:8px; padding:12px; text-align:center;">
-                      <div style="color:#aaa; font-size:11px;">風險報酬比</div>
+                      <div style="color:#aaa; font-size:13px;">風險報酬比</div>
                       <div style="color:#FFD700; font-size:20px; font-weight:700;">1 : 2</div>
-                      <div style="color:#aaa; font-size:11px;">
+                      <div style="color:#aaa; font-size:13px;">
                         損 {loss_pct:.1f}% → 獲 {gain_pct:.1f}%
                       </div>
                     </div>""", unsafe_allow_html=True)
@@ -676,7 +676,7 @@ def render_news_intelligence(ticker: str, company_name: str) -> None:
               <div style="padding-top:2px; flex-shrink:0;">{badge_html}</div>
               <div>
                 <div style="font-size:14px; line-height:1.5;">{title_display}</div>
-                <div style="color:#666; font-size:11px; margin-top:3px;">{pub_info}</div>
+                <div style="color:#666; font-size:13px; margin-top:3px;">{pub_info}</div>
               </div>
             </div>""", unsafe_allow_html=True)
 
@@ -923,7 +923,7 @@ def render_portfolio_dashboard() -> None:
             unsafe_allow_html=True)
         rcols[2].markdown(
             f"<span style='font-size:13px;'>${r['buy_price']:.2f} USD<br>"
-            f"<span style='color:#aaa; font-size:11px;'>≈ ${r['buy_price']*rate:.1f} HKD</span></span>",
+            f"<span style='color:#aaa; font-size:13px;'>≈ ${r['buy_price']*rate:.1f} HKD</span></span>",
             unsafe_allow_html=True)
         rcols[3].markdown(
             f"<span style='color:{ret_col}; font-size:14px; font-weight:700;'>{ret_sym}</span>",
@@ -1038,7 +1038,7 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                 st.markdown("### 🌡️ 宏觀市場情緒溫度計")
             with hdr_r:
                 st.markdown(
-                    "<div style='text-align:right; color:#666; font-size:11px; "
+                    "<div style='text-align:right; color:#666; font-size:13px; "
                     "padding-top:10px;'>StockTwits 60% ＋ 新聞 40%｜每 10 分鐘更新</div>",
                     unsafe_allow_html=True,
                 )
@@ -1076,10 +1076,10 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                         f"border-radius:7px; padding:10px 12px;'>"
                         f"<div style='color:#00FF7F; font-weight:700; font-size:13px;'>"
                         f"✅ 黃金交叉</div>"
-                        f"<div style='color:#aaa; font-size:11px; margin-top:4px;'>"
+                        f"<div style='color:#aaa; font-size:13px; margin-top:4px;'>"
                         f"{bm_lbl}<br>{bm_tick}</div>"
                         f"<hr style='border-color:#1A3A1A; margin:6px 0;'>"
-                        f"<div style='font-size:11px;'>"
+                        f"<div style='font-size:13px;'>"
                         f"SMA50 &nbsp;<b style='color:#fff;'>{sma50v:.1f}</b><br>"
                         f"SMA200 <b style='color:#fff;'>{sma200v:.1f}</b></div>"
                         f"<div style='color:#00FF7F; font-size:12px; margin-top:4px;'>"
@@ -1099,10 +1099,10 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                         f"border-radius:7px; padding:10px 12px;'>"
                         f"<div style='color:#FF4B4B; font-weight:700; font-size:13px;'>"
                         f"⚠️ 死亡交叉</div>"
-                        f"<div style='color:#aaa; font-size:11px; margin-top:4px;'>"
+                        f"<div style='color:#aaa; font-size:13px; margin-top:4px;'>"
                         f"{bm_lbl}<br>{bm_tick}</div>"
                         f"<hr style='border-color:#3A1A1A; margin:6px 0;'>"
-                        f"<div style='font-size:11px;'>"
+                        f"<div style='font-size:13px;'>"
                         f"SMA50 &nbsp;<b style='color:#fff;'>{sma50v:.1f}</b><br>"
                         f"SMA200 <b style='color:#fff;'>{sma200v:.1f}</b></div>"
                         f"<div style='color:{pc}; font-size:12px; margin-top:4px;'>"
@@ -1124,19 +1124,16 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                     f"<div style='background:#13162A; border-radius:7px; padding:10px 12px; font-size:12px;'>"
                     f"<div style='display:flex; justify-content:space-between; padding:3px 0;'>"
                     f"  <span style='color:#aaa;'>📰 新聞（40%）</span>"
-                    f"  <span style='color:{col_n}; font-weight:700;'>{news_score:.0f}"
-                    f"  <span style='font-size:10px;'>({label_n})</span></span></div>"
+                    f"  <span style='color:{col_n}; font-weight:700;'>{news_score:.0f} ({label_n})</span></div>"
                     f"<div style='display:flex; justify-content:space-between; padding:3px 0;'>"
                     f"  <span style='color:#aaa;'>💬 社交（60%）</span>"
-                    f"  <span style='color:{col_s}; font-weight:700;'>{social_score:.0f}"
-                    f"  <span style='font-size:10px;'>({label_s})</span></span></div>"
+                    f"  <span style='color:{col_s}; font-weight:700;'>{social_score:.0f} ({label_s})</span></div>"
                     f"<hr style='border-color:#2A2D3E; margin:5px 0;'>"
                     f"<div style='display:flex; justify-content:space-between; padding:2px 0;'>"
                     f"  <span style='color:#fff; font-weight:600;'>🎯 綜合</span>"
-                    f"  <span style='color:{col_c}; font-weight:800; font-size:15px;'>{combined:.0f}"
-                    f"  <span style='font-size:10px;'>({label_c})</span></span></div>"
+                    f"  <span style='color:{col_c}; font-weight:800; font-size:15px;'>{combined:.0f} ({label_c})</span></div>"
                     f"<hr style='border-color:#2A2D3E; margin:5px 0;'>"
-                    f"<div style='color:#555; font-size:10px;'>"
+                    f"<div style='color:#555; font-size:13px;'>"
                     f"🟢 看多 {sd.get('bull_count',0)}&nbsp;&nbsp;"
                     f"🔴 看空 {sd.get('bear_count',0)}&nbsp;&nbsp;"
                     f"共 {sd.get('total',0)} 則</div>"
