@@ -312,7 +312,7 @@ def plot_four_quadrant(
     try:
         is_pos_r = stock_return >= 0
         is_pos_a = alpha >= 0
-        if   is_pos_r and     is_pos_a:
+        if    is_pos_r and       is_pos_a:
             q_label, q_action, dot_color = "強勢上升", "建議加倉 ✅", "#00FF7F"
         elif not is_pos_r and is_pos_a:
             q_label, q_action, dot_color = "抗跌強勢", "可以持有 💪", "#00D4FF"
@@ -326,33 +326,32 @@ def plot_four_quadrant(
 
         fig = go.Figure()
         for (x0, y0, x1, y1, color) in [
-            (0,      0,     max_r,  max_a,  "rgba(0,255,127,0.06)"),
-            (-max_r, 0,     0,      max_a,  "rgba(0,212,255,0.06)"),
-            (-max_r, -max_a, 0,     0,      "rgba(255,75,75,0.06)"),
-            (0,      -max_a, max_r, 0,      "rgba(255,215,0,0.06)"),
+            (0,      0,      max_r,  max_a,  "rgba(0,255,127,0.06)"),
+            (-max_r, 0,      0,      max_a,  "rgba(0,212,255,0.06)"),
+            (-max_r, -max_a, 0,      0,      "rgba(255,75,75,0.06)"),
+            (0,      -max_a, max_r, 0,       "rgba(255,215,0,0.06)"),
         ]:
             fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1,
                           fillcolor=color, line_width=0, layer="below")
 
-        ann_kw = dict(showarrow=False, bgcolor="rgba(0,0,0,0.5)")
-        fig.add_annotation(x=max_r*0.55,  y=max_a*0.78,
-                           text="🚀 強勢上升<br><b>建議加倉</b>",
-                           font=dict(color="#00FF7F", size=9), **ann_kw)
-        fig.add_annotation(x=-max_r*0.55, y=max_a*0.78,
-                           text="💪 抗跌強勢<br><b>可以持有</b>",
-                           font=dict(color="#00D4FF", size=9), **ann_kw)
-        fig.add_annotation(x=-max_r*0.55, y=-max_a*0.78,
-                           text="⚠️ 補跌弱勢<br><b>考慮止損</b>",
-                           font=dict(color="#FF4B4B", size=9), **ann_kw)
-        fig.add_annotation(x=max_r*0.55,  y=-max_a*0.78,
-                           text="🔍 弱勢反彈<br><b>謹慎觀望</b>",
-                           font=dict(color="#FFD700", size=9), **ann_kw)
+        # 這裡將 font 設定分開，避免與 **ann_kw 解包內容衝突
+        ann_base = dict(showarrow=False, bgcolor="rgba(0,0,0,0.5)")
+
+        fig.add_annotation(x=max_r*0.55,  y=max_a*0.78, text="🚀 強勢上升<br><b>建議加倉</b>", 
+                           font=dict(color="#00FF7F", size=9), **ann_base)
+        fig.add_annotation(x=-max_r*0.55, y=max_a*0.78, text="💪 抗跌強勢<br><b>可以持有</b>", 
+                           font=dict(color="#00D4FF", size=9), **ann_base)
+        fig.add_annotation(x=-max_r*0.55, y=-max_a*0.78, text="⚠️ 補跌弱勢<br><b>考慮止損</b>", 
+                           font=dict(color="#FF4B4B", size=9), **ann_base)
+        fig.add_annotation(x=max_r*0.55,  y=-max_a*0.78, text="🔍 弱勢反彈<br><b>謹慎觀望</b>", 
+                           font=dict(color="#FFD700", size=9), **ann_base)
 
         fig.add_hline(y=0, line_color="#444", line_width=1.5)
         fig.add_vline(x=0, line_color="#444", line_width=1.5)
 
         dot_x = max(-max_r*0.93, min(max_r*0.93, stock_return))
         dot_y = max(-max_a*0.93, min(max_a*0.93, alpha))
+
         fig.add_trace(go.Scatter(
             x=[dot_x], y=[dot_y],
             mode="markers+text", text=[f"  {stock_ticker}"],
@@ -367,29 +366,22 @@ def plot_four_quadrant(
                 f"象限：{q_label}<extra></extra>"
             ),
         ))
+
         fig.update_layout(
             title=dict(text="四象限強弱矩陣", font=dict(size=12, color="#fff")),
-            xaxis=dict(
-                title=dict(text=f"{stock_ticker} 期間報酬 (%)",
-                           font=dict(color="#aaa", size=10)),
-                range=[-max_r, max_r], showgrid=False, zeroline=False,
-                tickfont=dict(color="#aaa", size=9), ticksuffix="%",
-            ),
-            yaxis=dict(
-                title=dict(text="超額 Alpha (%)", font=dict(color="#aaa", size=10)),
-                range=[-max_a, max_a], showgrid=False, zeroline=False,
-                tickfont=dict(color="#aaa", size=9), ticksuffix="%",
-            ),
+            xaxis=dict(title=dict(text=f"{stock_ticker} 期間報酬 (%)", font=dict(color="#aaa", size=10)),
+                       range=[-max_r, max_r], showgrid=False, zeroline=False, tickfont=dict(color="#aaa", size=9), ticksuffix="%"),
+            yaxis=dict(title=dict(text="超額 Alpha (%)", font=dict(color="#aaa", size=10)),
+                       range=[-max_a, max_a], showgrid=False, zeroline=False, tickfont=dict(color="#aaa", size=9), ticksuffix="%"),
             paper_bgcolor="#0E1117", plot_bgcolor="#12151F",
             font=dict(color="#fff"), height=340,
             margin=dict(t=38, b=50, l=60, r=20), showlegend=False,
         )
         return fig, q_label, q_action, dot_color
     except Exception as e:
-        print(_err("plot_four_quadrant", e))
+        # 確保此處的 _err 函數已定義，否則改為 print(f"Error in plot_four_quadrant: {e}")
+        print(f"Error in plot_four_quadrant: {e}")
         return None, "N/A", "N/A", "#aaa"
-
-
 # ── Sentiment gauge chart ──────────────────────────────────────────────────────
 def plot_sentiment_gauge(score: float, title_prefix: str = "市場宏觀情緒") -> go.Figure:
     """Plotly Gauge: 0 = Extreme Fear, 100 = Extreme Greed."""
