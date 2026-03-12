@@ -334,17 +334,22 @@ def plot_four_quadrant(
             fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1,
                           fillcolor=color, line_width=0, layer="below")
 
-        # 這裡將 font 設定分開，避免與 **ann_kw 解包內容衝突
-        ann_base = dict(showarrow=False, bgcolor="rgba(0,0,0,0.5)")
-
-        fig.add_annotation(x=max_r*0.55,  y=max_a*0.78, text="🚀 強勢上升<br><b>建議加倉</b>", 
-                           font=dict(color="#00FF7F", size=9), **ann_base)
-        fig.add_annotation(x=-max_r*0.55, y=max_a*0.78, text="💪 抗跌強勢<br><b>可以持有</b>", 
-                           font=dict(color="#00D4FF", size=9), **ann_base)
-        fig.add_annotation(x=-max_r*0.55, y=-max_a*0.78, text="⚠️ 補跌弱勢<br><b>考慮止損</b>", 
-                           font=dict(color="#FF4B4B", size=9), **ann_base)
-        fig.add_annotation(x=max_r*0.55,  y=-max_a*0.78, text="🔍 弱勢反彈<br><b>謹慎觀望</b>", 
-                           font=dict(color="#FFD700", size=9), **ann_base)
+        fig.add_annotation(
+            x=max_r*0.55, y=max_a*0.78, text="🚀 強勢上升<br><b>建議加倉</b>",
+            font=dict(color="#00FF7F", size=9), showarrow=False, bgcolor="rgba(0,0,0,0.5)",
+        )
+        fig.add_annotation(
+            x=-max_r*0.55, y=max_a*0.78, text="💪 抗跌強勢<br><b>可以持有</b>",
+            font=dict(color="#00D4FF", size=9), showarrow=False, bgcolor="rgba(0,0,0,0.5)",
+        )
+        fig.add_annotation(
+            x=-max_r*0.55, y=-max_a*0.78, text="⚠️ 補跌弱勢<br><b>考慮止損</b>",
+            font=dict(color="#FF4B4B", size=9), showarrow=False, bgcolor="rgba(0,0,0,0.5)",
+        )
+        fig.add_annotation(
+            x=max_r*0.55, y=-max_a*0.78, text="🔍 弱勢反彈<br><b>謹慎觀望</b>",
+            font=dict(color="#FFD700", size=9), showarrow=False, bgcolor="rgba(0,0,0,0.5)",
+        )
 
         fig.add_hline(y=0, line_color="#444", line_width=1.5)
         fig.add_vline(x=0, line_color="#444", line_width=1.5)
