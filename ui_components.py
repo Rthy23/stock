@@ -205,8 +205,24 @@ def plot_price_chart(
             plot_bgcolor="#1A1D2E", paper_bgcolor="#0E1117",
             xaxis_rangeslider_visible=False,
             height=520,
+            hovermode="x unified",
             legend=dict(orientation="h", yanchor="bottom", y=1.02,
                         xanchor="right", x=1),
+            annotations=[
+                dict(
+                    xref="paper", yref="paper",
+                    x=0.0, y=-0.08,
+                    showarrow=False,
+                    text=(
+                        "📗 <b style='color:#00FF7F'>陽線</b>（收 > 開，綠色）　"
+                        "📕 <b style='color:#FF4B4B'>陰線</b>（收 < 開，紅色）　"
+                        "— SMA50（金）　·· SMA200（橙）"
+                    ),
+                    font=dict(size=10, color="#888"),
+                    align="left",
+                    xanchor="left",
+                ),
+            ],
         )
         return fig
     except Exception as e:
@@ -255,7 +271,23 @@ def plot_volume_chart(ticker: str, hist: pd.DataFrame) -> tuple:
                        title=dict(text="成交量", font=dict(color="#aaa", size=11))),
             legend=dict(font=dict(color="#aaa"), bgcolor="rgba(0,0,0,0)"),
             plot_bgcolor="#0E1117", paper_bgcolor="#0E1117",
-            height=260, margin=dict(t=42, b=40, l=65, r=20), barmode="overlay",
+            height=290, margin=dict(t=42, b=55, l=65, r=20), barmode="overlay",
+            hovermode="x unified",
+            annotations=[
+                dict(
+                    xref="paper", yref="paper",
+                    x=0.0, y=-0.18,
+                    showarrow=False,
+                    text=(
+                        "🔵 <b style='color:#00D4FF'>藍色柱</b>：當日陽線成交（收 > 開）　"
+                        "🔴 <b style='color:#FF4B4B'>紅色柱</b>：當日陰線成交（收 < 開）　"
+                        "— <b style='color:#FFD700'>黃線</b>：20日均量"
+                    ),
+                    font=dict(size=10, color="#888"),
+                    align="left",
+                    xanchor="left",
+                ),
+            ],
         )
         return fig, vol_ratio, is_institutional
     except Exception as e:
@@ -477,27 +509,37 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
                 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown("資料不足")
-        if stop and risk_pct is not None:
+        if stop:
             st.markdown("---")
-            loss_pct = risk_pct * 100
-            gain_pct = risk_pct * 2 * 100
-            col_warn, col_ratio = st.columns([3, 1])
-            with col_warn:
+            entry_price = buy_limit
+            if price < stop:
                 st.error(
-                    f"⚠️ **風險提示**：若以目前價格 ${price:.2f} 買入，"
-                    f"跌至止損線 ${stop:.2f} 將虧損約 **{loss_pct:.1f}%**。"
-                    f"請確保此倉位的虧損在您的整體資金管理範圍內。"
+                    f"🚨 **已觸發止損 / 不建議此買入價**：目前股價 ${price:.2f} 已低於止損線 "
+                    f"${stop:.2f}，技術上已跌破止損位。"
+                    f"**強烈不建議**在此價位買入，請等待趨勢確認後再重新評估。"
                 )
-            with col_ratio:
-                st.markdown(f"""
-                <div style="background:#1A1D2E; border:1px solid #444;
-                            border-radius:8px; padding:12px; text-align:center;">
-                  <div style="color:#aaa; font-size:11px;">風險報酬比</div>
-                  <div style="color:#FFD700; font-size:20px; font-weight:700;">1 : 2</div>
-                  <div style="color:#aaa; font-size:11px;">
-                    損 {loss_pct:.1f}% → 獲 {gain_pct:.1f}%
-                  </div>
-                </div>""", unsafe_allow_html=True)
+            elif risk_pct is not None:
+                loss_pct = abs(risk_pct) * 100
+                gain_pct = loss_pct * 2
+                formula_pct = ((stop - entry_price) / entry_price) * 100
+                col_warn, col_ratio = st.columns([3, 1])
+                with col_warn:
+                    st.error(
+                        f"⚠️ **風險提示**：以建議買入價 ${entry_price:.2f} 計算，"
+                        f"跌至止損線 ${stop:.2f} 將虧損約 **{loss_pct:.1f}%**。"
+                        f"（風控公式：(止損 − 買入) ÷ 買入 = {formula_pct:.1f}%）"
+                        f"　請確保此倉位的虧損在您的整體資金管理範圍內。"
+                    )
+                with col_ratio:
+                    st.markdown(f"""
+                    <div style="background:#1A1D2E; border:1px solid #444;
+                                border-radius:8px; padding:12px; text-align:center;">
+                      <div style="color:#aaa; font-size:11px;">風險報酬比</div>
+                      <div style="color:#FFD700; font-size:20px; font-weight:700;">1 : 2</div>
+                      <div style="color:#aaa; font-size:11px;">
+                        損 {loss_pct:.1f}% → 獲 {gain_pct:.1f}%
+                      </div>
+                    </div>""", unsafe_allow_html=True)
         return sma50, sma200, stop, target, buy_lower, buy_upper
     except Exception as e:
         st.error(f"MODULE_ERROR: [ui_components] | FUNCTION: [render_trade_plan] | ERROR: {e}")

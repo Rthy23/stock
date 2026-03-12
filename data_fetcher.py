@@ -420,10 +420,10 @@ def get_combined_sentiment(ticker: str) -> dict:
 
 # ── VIX / benchmark ───────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
-def get_vix_history(lookback: int = 20) -> pd.DataFrame:
-    """Fetch ^VIX history; return DataFrame with Close renamed to VIX."""
+def get_vix_history(lookback: int = 63) -> pd.DataFrame:
+    """Fetch ^VIX history for ~3 months; return DataFrame with Close renamed to VIX."""
     try:
-        hist = yf.Ticker("^VIX").history(period="1mo")
+        hist = yf.Ticker("^VIX").history(period="3mo")
         if hist.empty:
             return pd.DataFrame()
         df  = hist[["Close"]].copy().rename(columns={"Close": "VIX"})

@@ -187,6 +187,33 @@ def main() -> None:
         st.sidebar.caption("尚未收藏任何股票\n在個股診斷頁面點擊「添加到收藏夾」")
 
     st.sidebar.markdown("---")
+
+    # ── 術語注解清單 ──────────────────────────────────────────────────────────
+    with st.sidebar.expander("📚 術語注解清單", expanded=False):
+        st.markdown(
+            """
+**RSI（相對強弱指標）**
+> 股票的「體力值」。RSI > 70 表示超買，容易出現回調；RSI < 30 表示超賣，容易出現反彈。
+
+**MACD（指數平滑移動平均線）**
+> 趨勢指南針。短期均線向上穿越長期均線為「金叉」，看漲；向下穿越為「死叉」，看跌。
+
+**乖離率（Bias）**
+> 股價與均線之間的「橡皮筋」距離。拉得越遠越容易彈回，是衡量超漲超跌的輔助指標。
+
+**黃金交叉（Golden Cross）**
+> 短期均線（如 SMA50）向上穿越長期均線（如 SMA200），為多頭趨勢的強烈訊號。
+
+**做 T（T+0 操作）**
+> 當天低點買入、高點賣出，賺取當日波動價差，以降低平均持倉成本的操作技巧。
+
+**做空（Short Selling）**
+> 先向券商借入股票賣出，再於低價買回還券。預期股價下跌時使用，可從跌勢中獲利。
+            """,
+            unsafe_allow_html=False,
+        )
+
+    st.sidebar.markdown("---")
     st.sidebar.caption(f"更新時間：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
     # Opportunity banner (all pages)
@@ -343,6 +370,7 @@ def main() -> None:
                     template="plotly_dark",
                     paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
                     showlegend=False,
+                    hovermode="closest",
                 )
                 fig_cap.update_yaxes(tickformat=".2s")
                 st.plotly_chart(fig_cap, use_container_width=True)
@@ -359,6 +387,7 @@ def main() -> None:
                 fig_scatter.update_layout(
                     template="plotly_dark",
                     paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
+                    hovermode="closest",
                 )
                 st.plotly_chart(fig_scatter, use_container_width=True)
 
@@ -472,6 +501,48 @@ def main() -> None:
             m5.metric("營收增長", f"{stock_info['revenue_growth']*100:.1f}%" if stock_info["revenue_growth"] else "N/A")
             m6.metric("EPS",      f"${stock_info['eps']:.2f}" if stock_info["eps"] else "N/A")
             m7.metric("Beta",     f"{stock_info['beta']:.2f}" if stock_info["beta"] else "N/A")
+
+            # ── 1週 / 1個月 / 3個月 對比分析 ─────────────────────────────────
+            if hist is not None and not hist.empty:
+                st.markdown("---")
+                st.markdown("### 📅 歷史表現對比分析（1週 / 1個月 / 3個月）")
+                _periods = {"1 週": 5, "1 個月": 21, "3 個月": 63}
+                _tabs = st.tabs(list(_periods.keys()))
+                for _tab, (_label, _days) in zip(_tabs, _periods.items()):
+                    with _tab:
+                        _slice = hist.tail(_days)
+                        if len(_slice) < 2:
+                            st.caption("資料不足，無法計算此區間。")
+                            continue
+                        _open_p   = float(_slice["Close"].iloc[0])
+                        _close_p  = float(_slice["Close"].iloc[-1])
+                        _high_p   = float(_slice["High"].max())
+                        _low_p    = float(_slice["Low"].min())
+                        _ret_p    = (_close_p - _open_p) / _open_p * 100
+                        _avg_vol  = float(_slice["Volume"].mean())
+                        _ret_col  = "#00FF7F" if _ret_p >= 0 else "#FF4B4B"
+                        _ret_sign = f"+{_ret_p:.2f}%" if _ret_p >= 0 else f"{_ret_p:.2f}%"
+                        _c1, _c2, _c3, _c4 = st.columns(4)
+                        _c1.metric(f"區間報酬（{_label}）", _ret_sign,
+                                   delta=_ret_sign, delta_color="normal")
+                        _c2.metric("區間最高",  f"${_high_p:.2f}")
+                        _c3.metric("區間最低",  f"${_low_p:.2f}")
+                        _c4.metric("均日成交量", f"{_avg_vol:,.0f}")
+                        _fig_p = px.line(
+                            _slice.reset_index(),
+                            x=_slice.index, y="Close",
+                            title=f"{ticker} — {_label}收盤走勢",
+                            labels={"Close": "收盤價 (USD)", "x": "日期"},
+                            color_discrete_sequence=[_ret_col],
+                        )
+                        _fig_p.update_layout(
+                            template="plotly_dark",
+                            paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
+                            height=250, margin=dict(t=38, b=30, l=60, r=20),
+                            hovermode="x unified",
+                        )
+                        st.plotly_chart(_fig_p, use_container_width=True,
+                                        key=f"period_chart_{ticker}_{_label}")
 
             # ── 決策速查表 ─────────────────────────────────────────────────────
             st.markdown("---")

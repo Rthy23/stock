@@ -199,15 +199,16 @@ def calc_buy_zone(price, sma50, sma200) -> tuple:
 def calc_exit_strategy(price, sma200, low20) -> tuple:
     """
     Stop-loss: max(SMA200×0.97, low20×0.98).
-    Take-profit: risk×2 above entry (1:2 R:R).
+    Take-profit: 1:2 R:R from entry.
+    risk_pct = (止損價 - 買入價) / 買入價 × 100  (negative, representing loss %).
     Returns (stop, target, risk_pct).
     """
     try:
         if sma200 is None or low20 is None:
             return None, None, None
         stop    = max(sma200 * 0.97, low20 * 0.98)
-        risk    = (price - stop) / price
-        target  = price * (1 + risk * 2)
+        risk    = (stop - price) / price          # negative value (loss %)
+        target  = price * (1 - risk * 2)          # price + 2× the upside equivalent
         return stop, target, risk
     except Exception as e:
         print(_err("calc_exit_strategy", e))
@@ -489,7 +490,7 @@ def plot_fear_timeline(vix_df: pd.DataFrame, macro_events: list) -> go.Figure:
                 )
 
         fig.update_layout(
-            title={"text": "📉 市場恐慌指數走勢（過去 20 個交易日）",
+            title={"text": "📉 市場恐慌指數走勢（過去 3 個月）",
                    "font": {"size": 14, "color": "#FFFFFF"}},
             xaxis=dict(showgrid=True, gridcolor="#1E2130", tickfont={"color": "#aaa"},
                        title=dict(text="日期", font={"color": "#aaa"})),
