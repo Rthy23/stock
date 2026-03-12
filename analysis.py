@@ -215,6 +215,107 @@ def calc_exit_strategy(price, sma200, low20) -> tuple:
         return None, None, None
 
 
+# ── Investment horizon classifier ─────────────────────────────────────────────
+def classify_investment_horizon(
+    price: float,
+    sma50,
+    sma200,
+    hist: pd.DataFrame,
+) -> dict:
+    """
+    Classify investment horizon as long-term (長期) or short-term (短期)
+    based on trend position, moving-average relationship, and volatility.
+
+    Scoring (+/−):
+      +2  price between SMA50 and SMA200 (ideal accumulation zone)
+      +1  SMA50 > SMA200 (golden-cross territory)
+      +1  price > SMA200 (above long-term trend)
+      −1  price > SMA50 × 1.05 (extended, momentum-chasing risk)
+      −1  price < SMA200 (below long-term trend)
+      −1  30-day daily-return std > 3 % (high volatility)
+
+    Score ≥ 2 → 長期 (Long-Term)
+    Score  < 2 → 短期 (Short-Term)
+
+    Returns dict with:
+      horizon      "long" | "short"
+      label        "長期投資" | "短期交易"
+      icon         emoji string
+      hold_period  human-readable holding range
+      reasons      list[str]  bullet points explaining the classification
+      bg           CSS background colour
+      border       CSS border colour
+      accent       CSS text-highlight colour
+    """
+    try:
+        score   = 0
+        reasons = []
+
+        if sma50 is not None and sma200 is not None:
+            in_zone = (min(sma50, sma200) <= price <= max(sma50, sma200))
+            if in_zone:
+                score += 2
+                reasons.append("股價位於 SMA50–SMA200 理想建倉區間")
+            if sma50 > sma200:
+                score += 1
+                reasons.append("SMA50 > SMA200（黃金交叉趨勢）")
+            if price > sma200:
+                score += 1
+                reasons.append("股價站上 SMA200 長期均線")
+            else:
+                score -= 1
+                reasons.append("股價低於 SMA200，長期趨勢偏弱")
+            if price > sma50 * 1.05:
+                score -= 1
+                reasons.append("股價短期漲幅偏大（> SMA50 × 1.05），回調風險較高")
+        else:
+            reasons.append("均線資料不足，以波動率作為主要依據")
+
+        if hist is not None and not hist.empty and len(hist) >= 10:
+            returns = hist["Close"].pct_change().dropna()
+            vol30   = returns.tail(30).std() * 100
+            if vol30 > 3.0:
+                score -= 1
+                reasons.append(f"近30日日波動率 {vol30:.1f}%，高波動適合短期操作")
+            else:
+                reasons.append(f"近30日日波動率 {vol30:.1f}%，波動穩定")
+
+        if score >= 2:
+            return {
+                "horizon":     "long",
+                "label":       "長期投資",
+                "icon":        "🌱",
+                "hold_period": "建議持有週期：6 個月 ～ 2 年以上",
+                "reasons":     reasons,
+                "bg":          "#0F2318",
+                "border":      "#00FF7F",
+                "accent":      "#00FF7F",
+            }
+        else:
+            return {
+                "horizon":     "short",
+                "label":       "短期交易",
+                "icon":        "⚡",
+                "hold_period": "建議持有週期：2 週 ～ 3 個月",
+                "reasons":     reasons,
+                "bg":          "#0F1A2E",
+                "border":      "#00D4FF",
+                "accent":      "#00D4FF",
+            }
+    except Exception as e:
+        print(_err("classify_investment_horizon", e))
+        return {
+            "horizon":     "short",
+            "label":       "短期交易",
+            "icon":        "⚡",
+            "hold_period": "建議持有週期：2 週 ～ 3 個月",
+            "reasons":     ["分類計算發生錯誤，預設顯示短期"],
+            "bg":          "#0F1A2E",
+            "border":      "#00D4FF",
+            "accent":      "#00D4FF",
+        }
+
+
 # ── Relative strength chart ────────────────────────────────────────────────────
 def plot_relative_strength(
     stock_hist:   pd.DataFrame,

@@ -12,7 +12,7 @@ from datetime import datetime
 from analysis import (
     classify_sentiment, sentiment_badge, news_impact_summary,
     compute_technicals, screen_stocks, format_market_cap,
-    calc_buy_zone, calc_exit_strategy,
+    calc_buy_zone, calc_exit_strategy, classify_investment_horizon,
     _vix_to_greed_score, _score_to_label,
     plot_relative_strength, plot_four_quadrant,
     plot_sentiment_gauge, plot_fear_timeline,
@@ -540,6 +540,61 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
                         損 {loss_pct:.1f}% → 獲 {gain_pct:.1f}%
                       </div>
                     </div>""", unsafe_allow_html=True)
+        # ── Investment horizon classification box ──────────────────────────
+        horizon = classify_investment_horizon(price, sma50, sma200, hist)
+        acc     = horizon["accent"]
+        bg      = horizon["bg"]
+        bdr     = horizon["border"]
+        icon    = horizon["icon"]
+        label   = horizon["label"]
+        period  = horizon["hold_period"]
+        reasons = horizon["reasons"]
+
+        bullet_html = "".join(
+            f"<li style='margin:4px 0; font-size:13px; color:#ccc;'>{r}</li>"
+            for r in reasons
+        )
+
+        st.markdown("---")
+        st.markdown(
+            f"""
+            <div style="
+                background:{bg};
+                border-left:4px solid {bdr};
+                border-radius:8px;
+                padding:16px 20px;
+                margin-top:8px;
+            ">
+              <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                <span style="font-size:24px;">{icon}</span>
+                <div>
+                  <span style="font-size:13px; color:#aaa; letter-spacing:.5px;">
+                    投資屬性分類
+                  </span><br>
+                  <span style="font-size:18px; font-weight:700; color:{acc};">
+                    {label}
+                  </span>
+                </div>
+              </div>
+              <div style="
+                  background:#ffffff0d;
+                  border-radius:6px;
+                  padding:8px 12px;
+                  margin-bottom:10px;
+                  font-size:13px;
+                  color:{acc};
+                  font-weight:600;
+              ">
+                🗓 {period}
+              </div>
+              <ul style="margin:0; padding-left:18px; list-style:disc;">
+                {bullet_html}
+              </ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         return sma50, sma200, stop, target, buy_lower, buy_upper
     except Exception as e:
         st.error(f"MODULE_ERROR: [ui_components] | FUNCTION: [render_trade_plan] | ERROR: {e}")
