@@ -252,7 +252,10 @@ def main() -> None:
                 unsafe_allow_html=True,
             )
 
-        render_macro_sentiment_dashboard(bm_data=bm)
+        try:
+            render_macro_sentiment_dashboard(bm_data=bm)
+        except Exception as _macro_err:
+            st.warning(f"⚠️ 宏觀情緒圖表加載失敗，請重新整理頁面。（{_macro_err}）")
 
         st.markdown("根據您自定義的基本面條件，自動篩選符合條件的優質美股")
         col1, col2, col3, col4 = st.columns(4)
@@ -358,38 +361,41 @@ def main() -> None:
 
             df = pd.DataFrame(results)
             st.markdown("### 📊 篩選結果圖表")
-            c1, c2 = st.columns(2)
-            with c1:
-                fig_cap = px.bar(
-                    df.head(10), x="ticker", y="market_cap",
-                    title="市值比較",
-                    color="market_cap", color_continuous_scale="Blues",
-                    labels={"market_cap": "市值 (USD)", "ticker": "股票代碼"},
-                )
-                fig_cap.update_layout(
-                    template="plotly_dark",
-                    paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
-                    showlegend=False,
-                    hovermode="closest",
-                )
-                fig_cap.update_yaxes(tickformat=".2s")
-                st.plotly_chart(fig_cap, use_container_width=True)
-            with c2:
-                fig_scatter = px.scatter(
-                    df, x="pe_ratio", y="net_margin",
-                    size="market_cap", color="revenue_growth",
-                    hover_data=["ticker", "name"],
-                    title="P/E vs 淨利率（氣泡=市值）",
-                    labels={"pe_ratio": "P/E Ratio", "net_margin": "淨利率",
-                            "revenue_growth": "營收增長"},
-                    color_continuous_scale="Teal",
-                )
-                fig_scatter.update_layout(
-                    template="plotly_dark",
-                    paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
-                    hovermode="closest",
-                )
-                st.plotly_chart(fig_scatter, use_container_width=True)
+            try:
+                c1, c2 = st.columns(2)
+                with c1:
+                    fig_cap = px.bar(
+                        df.head(10), x="ticker", y="market_cap",
+                        title="市值比較",
+                        color="market_cap", color_continuous_scale="Blues",
+                        labels={"market_cap": "市值 (USD)", "ticker": "股票代碼"},
+                    )
+                    fig_cap.update_layout(
+                        template="plotly_dark",
+                        paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
+                        showlegend=False,
+                        hovermode="closest",
+                    )
+                    fig_cap.update_yaxes(tickformat=".2s")
+                    st.plotly_chart(fig_cap, use_container_width=True)
+                with c2:
+                    fig_scatter = px.scatter(
+                        df, x="pe_ratio", y="net_margin",
+                        size="market_cap", color="revenue_growth",
+                        hover_data=["ticker", "name"],
+                        title="P/E vs 淨利率（氣泡=市值）",
+                        labels={"pe_ratio": "P/E Ratio", "net_margin": "淨利率",
+                                "revenue_growth": "營收增長"},
+                        color_continuous_scale="Teal",
+                    )
+                    fig_scatter.update_layout(
+                        template="plotly_dark",
+                        paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
+                        hovermode="closest",
+                    )
+                    st.plotly_chart(fig_scatter, use_container_width=True)
+            except Exception as _chart_err:
+                st.warning(f"⚠️ 篩選結果圖表加載失敗：{_chart_err}")
 
         elif not st.session_state.get("screening"):
             st.info("👆 點擊上方按鈕開始篩選股票")
@@ -1024,4 +1030,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as _top_err:
+        st.error(f"❌ 程式初始化失敗，請重新整理頁面。（{_top_err}）")

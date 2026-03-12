@@ -334,7 +334,7 @@ def plot_four_quadrant(
             fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1,
                           fillcolor=color, line_width=0, layer="below")
 
-        ann_kw = dict(showarrow=False, font=dict(size=9), bgcolor="rgba(0,0,0,0.5)")
+        ann_kw = dict(showarrow=False, bgcolor="rgba(0,0,0,0.5)")
         fig.add_annotation(x=max_r*0.55,  y=max_a*0.78,
                            text="🚀 強勢上升<br><b>建議加倉</b>",
                            font=dict(color="#00FF7F", size=9), **ann_kw)
