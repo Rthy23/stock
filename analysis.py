@@ -302,17 +302,15 @@ def plot_relative_strength(
 # ── Four-quadrant matrix ───────────────────────────────────────────────────────
 def plot_four_quadrant(
     stock_return: float,
-    alpha:        float,
+    alpha: float,
     stock_ticker: str,
-    bm_ticker:    str,
+    bm_ticker: str,
 ) -> tuple:
-    """
-    2×2 quadrant scatter.  Returns (fig, q_label, q_action, dot_color).
-    """
+    """2x2 quadrant scatter. Returns (fig, q_label, q_action, dot_color)."""
     try:
         is_pos_r = stock_return >= 0
         is_pos_a = alpha >= 0
-        if    is_pos_r and       is_pos_a:
+        if is_pos_r and is_pos_a:
             q_label, q_action, dot_color = "強勢上升", "建議加倉 ✅", "#00FF7F"
         elif not is_pos_r and is_pos_a:
             q_label, q_action, dot_color = "抗跌強勢", "可以持有 💪", "#00D4FF"
@@ -322,45 +320,60 @@ def plot_four_quadrant(
             q_label, q_action, dot_color = "弱勢反彈", "謹慎觀望 🔍", "#FFD700"
 
         max_r = max(abs(stock_return) * 1.4, 20)
-        max_a = max(abs(alpha)        * 1.4, 15)
+        max_a = max(abs(alpha) * 1.4, 15)
 
         fig = go.Figure()
-        for (x0, y0, x1, y1, color) in [
-            (0,      0,      max_r,  max_a,  "rgba(0,255,127,0.06)"),
-            (-max_r, 0,      0,      max_a,  "rgba(0,212,255,0.06)"),
-            (-max_r, -max_a, 0,      0,      "rgba(255,75,75,0.06)"),
-            (0,      -max_a, max_r, 0,       "rgba(255,215,0,0.06)"),
-        ]:
-            fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1,
-                          fillcolor=color, line_width=0, layer="below")
+
+        fig.add_shape(type="rect", x0=0,      y0=0,      x1=max_r,  y1=max_a,
+                      fillcolor="rgba(0,255,127,0.06)", line_width=0, layer="below")
+        fig.add_shape(type="rect", x0=-max_r, y0=0,      x1=0,      y1=max_a,
+                      fillcolor="rgba(0,212,255,0.06)", line_width=0, layer="below")
+        fig.add_shape(type="rect", x0=-max_r, y0=-max_a, x1=0,      y1=0,
+                      fillcolor="rgba(255,75,75,0.06)",  line_width=0, layer="below")
+        fig.add_shape(type="rect", x0=0,      y0=-max_a, x1=max_r,  y1=0,
+                      fillcolor="rgba(255,215,0,0.06)",  line_width=0, layer="below")
 
         fig.add_annotation(
-            x=max_r*0.55, y=max_a*0.78, text="🚀 強勢上升<br><b>建議加倉</b>",
-            font=dict(color="#00FF7F", size=9), showarrow=False, bgcolor="rgba(0,0,0,0.5)",
+            x=max_r * 0.55, y=max_a * 0.78,
+            text="🚀 強勢上升<br><b>建議加倉</b>",
+            font=dict(color="#00FF7F", size=9),
+            showarrow=False,
+            bgcolor="rgba(0,0,0,0.5)",
         )
         fig.add_annotation(
-            x=-max_r*0.55, y=max_a*0.78, text="💪 抗跌強勢<br><b>可以持有</b>",
-            font=dict(color="#00D4FF", size=9), showarrow=False, bgcolor="rgba(0,0,0,0.5)",
+            x=-max_r * 0.55, y=max_a * 0.78,
+            text="💪 抗跌強勢<br><b>可以持有</b>",
+            font=dict(color="#00D4FF", size=9),
+            showarrow=False,
+            bgcolor="rgba(0,0,0,0.5)",
         )
         fig.add_annotation(
-            x=-max_r*0.55, y=-max_a*0.78, text="⚠️ 補跌弱勢<br><b>考慮止損</b>",
-            font=dict(color="#FF4B4B", size=9), showarrow=False, bgcolor="rgba(0,0,0,0.5)",
+            x=-max_r * 0.55, y=-max_a * 0.78,
+            text="⚠️ 補跌弱勢<br><b>考慮止損</b>",
+            font=dict(color="#FF4B4B", size=9),
+            showarrow=False,
+            bgcolor="rgba(0,0,0,0.5)",
         )
         fig.add_annotation(
-            x=max_r*0.55, y=-max_a*0.78, text="🔍 弱勢反彈<br><b>謹慎觀望</b>",
-            font=dict(color="#FFD700", size=9), showarrow=False, bgcolor="rgba(0,0,0,0.5)",
+            x=max_r * 0.55, y=-max_a * 0.78,
+            text="🔍 弱勢反彈<br><b>謹慎觀望</b>",
+            font=dict(color="#FFD700", size=9),
+            showarrow=False,
+            bgcolor="rgba(0,0,0,0.5)",
         )
 
         fig.add_hline(y=0, line_color="#444", line_width=1.5)
         fig.add_vline(x=0, line_color="#444", line_width=1.5)
 
-        dot_x = max(-max_r*0.93, min(max_r*0.93, stock_return))
-        dot_y = max(-max_a*0.93, min(max_a*0.93, alpha))
+        dot_x = max(-max_r * 0.93, min(max_r * 0.93, stock_return))
+        dot_y = max(-max_a * 0.93, min(max_a * 0.93, alpha))
 
         fig.add_trace(go.Scatter(
             x=[dot_x], y=[dot_y],
-            mode="markers+text", text=[f"  {stock_ticker}"],
-            textposition="middle right", textfont=dict(color="#fff", size=11),
+            mode="markers+text",
+            text=[f"  {stock_ticker}"],
+            textposition="middle right",
+            textfont=dict(color="#fff", size=11),
             marker=dict(size=14, color=dot_color, symbol="circle",
                         line=dict(color="#fff", width=2)),
             showlegend=False,
@@ -374,18 +387,24 @@ def plot_four_quadrant(
 
         fig.update_layout(
             title=dict(text="四象限強弱矩陣", font=dict(size=12, color="#fff")),
-            xaxis=dict(title=dict(text=f"{stock_ticker} 期間報酬 (%)", font=dict(color="#aaa", size=10)),
-                       range=[-max_r, max_r], showgrid=False, zeroline=False, tickfont=dict(color="#aaa", size=9), ticksuffix="%"),
-            yaxis=dict(title=dict(text="超額 Alpha (%)", font=dict(color="#aaa", size=10)),
-                       range=[-max_a, max_a], showgrid=False, zeroline=False, tickfont=dict(color="#aaa", size=9), ticksuffix="%"),
+            xaxis=dict(
+                title=dict(text=f"{stock_ticker} 期間報酬 (%)", font=dict(color="#aaa", size=10)),
+                range=[-max_r, max_r], showgrid=False, zeroline=False,
+                tickfont=dict(color="#aaa", size=9), ticksuffix="%",
+            ),
+            yaxis=dict(
+                title=dict(text="超額 Alpha (%)", font=dict(color="#aaa", size=10)),
+                range=[-max_a, max_a], showgrid=False, zeroline=False,
+                tickfont=dict(color="#aaa", size=9), ticksuffix="%",
+            ),
             paper_bgcolor="#0E1117", plot_bgcolor="#12151F",
             font=dict(color="#fff"), height=340,
-            margin=dict(t=38, b=50, l=60, r=20), showlegend=False,
+            margin=dict(t=38, b=50, l=60, r=20),
+            showlegend=False,
         )
         return fig, q_label, q_action, dot_color
     except Exception as e:
-        # 確保此處的 _err 函數已定義，否則改為 print(f"Error in plot_four_quadrant: {e}")
-        print(f"Error in plot_four_quadrant: {e}")
+        print(_err("plot_four_quadrant", e))
         return None, "N/A", "N/A", "#aaa"
 # ── Sentiment gauge chart ──────────────────────────────────────────────────────
 def plot_sentiment_gauge(score: float, title_prefix: str = "市場宏觀情緒") -> go.Figure:
