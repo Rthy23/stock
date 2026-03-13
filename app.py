@@ -36,11 +36,7 @@ from ui_components import (
     plot_analyst_targets, plot_analyst_recs, plot_radar,
     zone_progress_bar,
 )
-from backtest_engine import (
-    run_backtest, RSI_PRESETS,
-    fetch_ohlcv, calc_rsi, calc_macd, calc_bollinger,
-    calc_obv, calc_mfi,
-)
+import backtest_engine as be
 from mpf_assistant import render_mpf_page
 from ocr_module import generate_quant_report
 
@@ -1224,11 +1220,11 @@ def main() -> None:
 
             asset_class = st.radio(
                 "資產類別（自動調整 RSI 閾值）",
-                list(RSI_PRESETS.keys()),
+                list(be.RSI_PRESETS.keys()),
                 horizontal=True,
                 key="bt_asset_class",
             )
-            preset = RSI_PRESETS[asset_class]
+            preset = be.RSI_PRESETS[asset_class]
 
             preset_info_cols = st.columns(4)
             for col_w, k, label in [
@@ -1325,7 +1321,7 @@ def main() -> None:
                     st.warning(f"⚠️ 最多支援 5 支股票，已自動使用前 5 支：{', '.join(tickers)}")
                 if tickers:
                     with st.spinner(f"正在執行 {strategy_mode} 回測（{years}年期），請稍候…"):
-                        result = run_backtest(
+                        result = be.run_backtest(
                             tickers, years, benchmark,
                             strategy_mode=strategy_mode,
                             rsi_buy=rsi_buy_v, rsi_sell=rsi_sell_v,
@@ -1548,16 +1544,16 @@ def main() -> None:
 
                 if indicator == "RSI":
                     fig_rsi = go.Figure()
-                    preset_now = RSI_PRESETS.get(
+                    preset_now = be.RSI_PRESETS.get(
                         st.session_state.get("bt_asset_class", "自定義"),
-                        RSI_PRESETS["自定義"]
+                        be.RSI_PRESETS["自定義"]
                     )
                     for i, t in enumerate(tickers_used):
                         with st.spinner(f"載入 {t} RSI…"):
-                            ohlcv = fetch_ohlcv(t, years_used)
+                            ohlcv = be.fetch_ohlcv(t, years_used)
                         if ohlcv.empty:
                             continue
-                        rsi_s = calc_rsi(ohlcv["Close"])
+                        rsi_s = be.calc_rsi(ohlcv["Close"])
                         fig_rsi.add_trace(go.Scatter(
                             x=rsi_s.index, y=rsi_s.values,
                             mode="lines", name=t,
@@ -1592,10 +1588,10 @@ def main() -> None:
                 elif indicator == "MACD":
                     for i, t in enumerate(tickers_used):
                         with st.spinner(f"載入 {t} MACD…"):
-                            ohlcv = fetch_ohlcv(t, years_used)
+                            ohlcv = be.fetch_ohlcv(t, years_used)
                         if ohlcv.empty:
                             continue
-                        macd_l, signal_l, hist_l = calc_macd(ohlcv["Close"])
+                        macd_l, signal_l, hist_l = be.calc_macd(ohlcv["Close"])
                         fig_m = go.Figure()
                         fig_m.add_trace(go.Scatter(
                             x=macd_l.index, y=macd_l.values, mode="lines",
@@ -1626,10 +1622,10 @@ def main() -> None:
                 else:  # Bollinger Bands
                     for i, t in enumerate(tickers_used[:3]):
                         with st.spinner(f"載入 {t} Bollinger…"):
-                            ohlcv = fetch_ohlcv(t, years_used)
+                            ohlcv = be.fetch_ohlcv(t, years_used)
                         if ohlcv.empty:
                             continue
-                        upper, mid, lower = calc_bollinger(ohlcv["Close"])
+                        upper, mid, lower = be.calc_bollinger(ohlcv["Close"])
                         fig_bb = go.Figure()
                         fig_bb.add_trace(go.Scatter(
                             x=upper.index, y=upper.values, mode="lines",
@@ -1682,10 +1678,10 @@ def main() -> None:
                     fig_obv = go.Figure()
                     for i, t in enumerate(tickers_used):
                         with st.spinner(f"載入 {t} OBV…"):
-                            ohlcv = fetch_ohlcv(t, years_used)
+                            ohlcv = be.fetch_ohlcv(t, years_used)
                         if ohlcv.empty:
                             continue
-                        obv_s = calc_obv(ohlcv["Close"], ohlcv["Volume"])
+                        obv_s = be.calc_obv(ohlcv["Close"], ohlcv["Volume"])
                         obv_norm = (obv_s / obv_s.abs().max() * 100).rename(t)
                         fig_obv.add_trace(go.Scatter(
                             x=obv_norm.index, y=obv_norm.values, mode="lines",
@@ -1715,10 +1711,10 @@ def main() -> None:
                 else:  # MFI
                     for i, t in enumerate(tickers_used):
                         with st.spinner(f"載入 {t} MFI…"):
-                            ohlcv = fetch_ohlcv(t, years_used)
+                            ohlcv = be.fetch_ohlcv(t, years_used)
                         if ohlcv.empty:
                             continue
-                        mfi_s = calc_mfi(
+                        mfi_s = be.calc_mfi(
                             ohlcv["High"], ohlcv["Low"],
                             ohlcv["Close"], ohlcv["Volume"]
                         )
