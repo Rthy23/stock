@@ -243,27 +243,18 @@ def render_upload_section() -> None:
         st.markdown("### 📸 上傳 eMPF 截圖（OCR 自動識別）")
         st.caption("支援多張圖片同時上傳。自動進行灰階預處理以提升識別率。OCR 失敗時自動彈出手動修正表單。")
 
-        api_key = (
-            st.secrets.get("GEMINI_API_KEY", "")
-            if hasattr(st, "secrets") else ""
-        )
+        try:
+            api_key = st.secrets.get("GEMINI_API_KEY", "")
+        except Exception:
+            api_key = ""
         if not api_key:
             api_key = os.environ.get("GEMINI_API_KEY", "")
-        if not api_key:
-            api_key = st.session_state.get("mpf_api_key", "")
 
         if not api_key:
-            with st.expander("🔑 設定 Gemini API Key（OCR 功能必需）", expanded=True):
-                api_key = st.text_input(
-                    "Gemini API Key",
-                    type="password",
-                    placeholder="AIza...",
-                    help="前往 https://aistudio.google.com 免費申請",
-                )
-                if api_key:
-                    st.session_state["mpf_api_key"] = api_key
-        else:
-            st.session_state["mpf_api_key"] = api_key
+            st.warning(
+                "⚠️ OCR 功能需要 Gemini API Key。"
+                "請於 Replit Secrets 中新增 **GEMINI_API_KEY**。"
+            )
 
         uploaded = st.file_uploader(
             "選擇截圖檔案",
@@ -273,9 +264,8 @@ def render_upload_section() -> None:
         )
 
         if uploaded and st.button("🔍 開始 OCR 識別", type="primary", key="mpf_ocr_btn"):
-            key_val = st.session_state.get("mpf_api_key", "")
-            if not key_val:
-                st.error("請先輸入 Gemini API Key 才能使用 OCR 識別功能。")
+            if not api_key:
+                st.error("請先在 Replit Secrets 中設定 GEMINI_API_KEY 才能使用 OCR 識別功能。")
                 return
 
             all_raw_items: list[dict] = []
@@ -283,7 +273,7 @@ def render_upload_section() -> None:
 
             for up in uploaded:
                 with st.spinner(f"正在預處理並識別 {up.name}…"):
-                    raw_items, err = ocr_with_gemini(up.read(), key_val)
+                    raw_items, err = ocr_with_gemini(up.read(), api_key)
                 if err:
                     st.warning(f"⚠️ {up.name} 識別失敗：{err}")
                     has_failure = True

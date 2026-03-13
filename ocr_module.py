@@ -52,7 +52,17 @@ def ocr_with_gemini(image_bytes: bytes, api_key: str) -> tuple[list[dict], str |
         img = Image.open(io.BytesIO(processed))
 
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+
+        _MODEL_NAME = "gemini-1.5-flash"
+        try:
+            available = [m.name for m in genai.list_models()
+                         if "generateContent" in m.supported_generation_methods]
+            if not any(_MODEL_NAME in n for n in available):
+                _MODEL_NAME = available[0] if available else _MODEL_NAME
+        except Exception:
+            pass
+
+        model = genai.GenerativeModel(_MODEL_NAME)
 
         prompt = (
             "You are an expert MPF (Mandatory Provident Fund) statement analyzer. "
@@ -162,7 +172,17 @@ def generate_quant_report(metrics: dict, api_key: str) -> str | None:
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+
+        _MODEL_NAME = "gemini-1.5-flash"
+        try:
+            available = [m.name for m in genai.list_models()
+                         if "generateContent" in m.supported_generation_methods]
+            if not any(_MODEL_NAME in n for n in available):
+                _MODEL_NAME = available[0] if available else _MODEL_NAME
+        except Exception:
+            pass
+
+        model = genai.GenerativeModel(_MODEL_NAME)
 
         pf   = metrics.get("portfolio_metrics", {})
         bm   = metrics.get("benchmark_metrics", {})

@@ -50,54 +50,111 @@ def _err(func: str, e: Exception) -> str:
             f"| ERROR: {type(e).__name__}: {e}")
 
 
+def _get_gemini_key() -> str:
+    """Read Gemini API key exclusively from st.secrets / environment. No UI input."""
+    try:
+        key = st.secrets.get("GEMINI_API_KEY", "")
+        if key:
+            return key
+    except Exception:
+        pass
+    return os.environ.get("GEMINI_API_KEY", "")
+
+
 def _inject_global_css() -> None:
-    """Inject theme (dark/light) + font-size CSS based on session state."""
-    dark_mode  = st.session_state.get("dark_mode", True)
-    font_size  = st.session_state.get("font_size", 13)
+    """
+    Inject global CSS:
+    - Default: light theme (white bg, dark text, Inter/Roboto font).
+    - Dark-mode toggle: override to dark palette.
+    - Font-size slider: applied globally.
+    """
+    dark_mode = st.session_state.get("dark_mode", False)
+    font_size = st.session_state.get("font_size", 13)
 
     if dark_mode:
-        bg_main  = "#0E1117"
-        bg_side  = "#1A1D2E"
-        txt_col  = "#FAFAFA"
-        inp_bg   = "#1A1D2E"
-        inp_bdr  = "#3A3D5C"
+        bg_main = "#0E1117"
+        bg_side = "#1A1D2E"
+        txt_col = "#F0F0F0"
+        inp_bg  = "#1A1D2E"
+        inp_bdr = "#3A3D5C"
+        card_bg = "#111827"
     else:
-        bg_main  = "#FFFFFF"
-        bg_side  = "#F4F6F8"
-        txt_col  = "#111111"
-        inp_bg   = "#FFFFFF"
-        inp_bdr  = "#CCCCCC"
+        bg_main = "#FFFFFF"
+        bg_side = "#F4F6F8"
+        txt_col = "#111111"
+        inp_bg  = "#FFFFFF"
+        inp_bdr = "#CCCCCC"
+        card_bg = "#F8F9FA"
+
+    font_stack = "'Inter', 'Roboto', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
 
     st.markdown(
         f"""<style>
-        /* Global base */
-        .stApp {{
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        /* ── Base ── */
+        html, body, .stApp {{
             background-color: {bg_main} !important;
             color: {txt_col} !important;
+            font-family: {font_stack} !important;
             font-size: {font_size}px !important;
         }}
         section[data-testid="stSidebar"] {{
             background-color: {bg_side} !important;
         }}
-        /* Text elements */
-        p, span, label, div, h1, h2, h3, h4, h5, h6,
-        .stMarkdown, .stCaption {{
+        section[data-testid="stSidebar"] * {{
+            font-family: {font_stack} !important;
+            color: {txt_col} !important;
+        }}
+
+        /* ── Typography ── */
+        p, span, label, div, li,
+        h1, h2, h3, h4, h5, h6,
+        .stMarkdown, .stCaption, .stText {{
+            font-family: {font_stack} !important;
             font-size: {font_size}px !important;
             color: {txt_col} !important;
         }}
-        /* Inputs */
+        h1 {{ font-size: {font_size + 10}px !important; font-weight: 700 !important; }}
+        h2 {{ font-size: {font_size + 6}px  !important; font-weight: 700 !important; }}
+        h3 {{ font-size: {font_size + 3}px  !important; font-weight: 600 !important; }}
+
+        /* ── Inputs ── */
         .stTextInput input, .stNumberInput input,
-        .stSelectbox select, .stTextArea textarea {{
+        .stSelectbox select, .stTextArea textarea,
+        input[type="text"], input[type="number"] {{
             background-color: {inp_bg} !important;
             color: {txt_col} !important;
             border-color: {inp_bdr} !important;
+            font-family: {font_stack} !important;
+            font-size: {font_size}px !important;
+            border-radius: 6px !important;
+        }}
+
+        /* ── Tables / DataFrames ── */
+        .stDataFrame, .dataframe, table {{
+            font-family: {font_stack} !important;
             font-size: {font_size}px !important;
         }}
-        /* Dataframe */
-        .stDataFrame {{ font-size: {font_size}px !important; }}
-        /* Sidebar text */
-        section[data-testid="stSidebar"] * {{
-            color: {txt_col} !important;
+
+        /* ── Buttons ── */
+        .stButton > button {{
+            font-family: {font_stack} !important;
+            font-size: {font_size}px !important;
+            border-radius: 6px !important;
+        }}
+
+        /* ── Tabs ── */
+        .stTabs [data-baseweb="tab"] {{
+            font-family: {font_stack} !important;
+            font-size: {font_size}px !important;
+        }}
+
+        /* ── Metric cards ── */
+        [data-testid="metric-container"] {{
+            background-color: {card_bg} !important;
+            border-radius: 8px !important;
+            padding: 8px !important;
         }}
         </style>""",
         unsafe_allow_html=True,
@@ -1300,24 +1357,16 @@ def main() -> None:
                                 f"SMA{preset['sma_period']} 濾網　止損 {stop_loss_v*100:.0f}%"
                             )
 
-                gemini_key_bt = st.text_input(
-                    "Gemini API Key（AI 分析報告，選填）",
-                    type="password",
-                    value=st.session_state.get("bt_gemini_key", ""),
-                    placeholder="AIza... （前往 aistudio.google.com 免費申請）",
-                    key="gemini_key_input",
-                )
                 submitted_bt = st.form_submit_button("🚀 執行回測", type="primary",
                                                      use_container_width=True)
 
             if submitted_bt:
                 tickers_raw = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
                 tickers = tickers_raw[:5]
-                st.session_state["bt_tickers"]    = raw_tickers
-                st.session_state["bt_years"]      = years
-                st.session_state["bt_benchmark"]  = benchmark
-                st.session_state["bt_strategy"]   = strategy_mode
-                st.session_state["bt_gemini_key"] = gemini_key_bt or st.session_state.get("bt_gemini_key","")
+                st.session_state["bt_tickers"]   = raw_tickers
+                st.session_state["bt_years"]     = years
+                st.session_state["bt_benchmark"] = benchmark
+                st.session_state["bt_strategy"]  = strategy_mode
                 if not tickers:
                     st.error("請至少輸入一個股票代碼。")
                 elif len(tickers_raw) > 5:
@@ -1500,11 +1549,7 @@ def main() -> None:
                 # ── Gemini AI analysis report ──────────────────────────────
                 st.markdown("---")
                 st.markdown("### 🤖 Gemini AI 量化分析報告")
-                gemini_key_val = (
-                    st.session_state.get("bt_gemini_key") or
-                    (st.secrets.get("GEMINI_API_KEY","") if hasattr(st,"secrets") else "") or
-                    __import__("os").environ.get("GEMINI_API_KEY","")
-                )
+                gemini_key_val = _get_gemini_key()
                 if gemini_key_val:
                     if st.button("✨ 生成 AI 分析報告", key="gen_gemini_report"):
                         with st.spinner("正在調用 Gemini AI 分析回測數據…"):
@@ -1512,18 +1557,18 @@ def main() -> None:
                         if report_text:
                             st.session_state["bt_gemini_report"] = report_text
                         else:
-                            st.warning("AI 報告生成失敗，請檢查 API Key 是否有效。")
+                            st.warning("AI 報告生成失敗，請確認 GEMINI_API_KEY 已正確設定於 Secrets。")
                     if st.session_state.get("bt_gemini_report"):
                         st.markdown(
-                            f"<div style='background:#0D1A2E; border-left:4px solid #00D4FF; "
+                            f"<div style='background:#F0F7FF; border-left:4px solid #0066CC; "
                             f"border-radius:8px; padding:16px; font-size:14px; "
-                            f"color:#E0E0E0; line-height:1.8;'>"
+                            f"color:#1A1A2E; line-height:1.8;'>"
                             f"{st.session_state['bt_gemini_report']}"
                             f"</div>",
                             unsafe_allow_html=True,
                         )
                 else:
-                    st.info("💡 在「策略設定」頁籤中輸入 Gemini API Key 即可自動生成量化分析報告。")
+                    st.info("💡 請在 Replit Secrets 中設定 GEMINI_API_KEY 以啟用 AI 分析報告功能。")
 
         # ──────────────────────────────────────────────────────────────────
         # Tab 3 — Technical Indicator Comparison
