@@ -63,33 +63,57 @@ def _get_gemini_key() -> str:
 
 
 def _inject_global_css() -> None:
-    """Force white theme with Inter font and full dark-text override."""
+    """Dark theme — black background, white text, Inter font."""
     font_size  = st.session_state.get("font_size", 13)
     font_stack = "'Inter', 'Roboto', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
 
     st.markdown(
         f"""<style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block');
 
-        /* ── Force white base ── */
+        /* ── Dark base ── */
         .stApp {{
-            background-color: #ffffff !important;
-            color: #000000 !important;
+            background-color: #0D1117 !important;
         }}
         html, body {{
-            background-color: #ffffff !important;
+            background-color: #0D1117 !important;
         }}
         section[data-testid="stSidebar"] {{
-            background-color: #F4F6F8 !important;
+            background-color: #161B22 !important;
         }}
 
-        /* ── Universal colour + font override ── */
+        /* ── Universal colour override ── */
         * {{
-            color: #333333 !important;
+            color: #E6EDF3 !important;
+        }}
+
+        /* ── Font override: block/inline elements — span intentionally omitted ── */
+        html, body, .stApp, div, p, button, label, input,
+        select, textarea, td, th, li, a,
+        h1, h2, h3, h4, h5, h6,
+        .stMarkdown, .stCaption, .stText {{
             font-family: {font_stack} !important;
         }}
 
-        /* ── Line-height fix (prevents text overlapping) ── */
+        /* ── Text-span font: lower specificity than icon selector below ── */
+        div span, p span, label span, button span,
+        .stMarkdown span, .stCaption span, .stText span, li span {{
+            font-family: {font_stack} !important;
+        }}
+
+        /* ── Material icon spans: restore icon font (data-testid is the real selector).
+               Specificity (0,0,1,1) > div span (0,0,0,2) so this wins for icon spans. ── */
+        span[data-testid="stIconMaterial"] {{
+            font-family: "Material Symbols Rounded" !important;
+            font-style: normal !important;
+            font-weight: 400 !important;
+            -webkit-font-feature-settings: "liga" 1 !important;
+            font-feature-settings: "liga" 1 !important;
+            color: #8B949E !important;
+        }}
+
+        /* ── Line-height fix ── */
         div, p, span, li, label, td, th {{
             line-height: 1.6 !important;
         }}
@@ -107,8 +131,9 @@ def _inject_global_css() -> None:
         .stTextInput input, .stNumberInput input,
         .stSelectbox select, .stTextArea textarea,
         input[type="text"], input[type="number"] {{
-            background-color: #FFFFFF !important;
-            border-color: #CCCCCC !important;
+            background-color: #1C2128 !important;
+            border-color: #30363D !important;
+            color: #E6EDF3 !important;
             font-size: {font_size}px !important;
             border-radius: 6px !important;
         }}
@@ -116,28 +141,69 @@ def _inject_global_css() -> None:
         /* ── Tables ── */
         .stDataFrame, .dataframe, table {{
             font-size: {font_size}px !important;
+            background-color: #1C2128 !important;
         }}
 
         /* ── Buttons ── */
         .stButton > button {{
             font-size: {font_size}px !important;
             border-radius: 6px !important;
+            background-color: #21262D !important;
+            border-color: #30363D !important;
+            color: #E6EDF3 !important;
+        }}
+        .stButton > button[kind="primary"] {{
+            background-color: #1F6FEB !important;
+            border-color: #1F6FEB !important;
+            color: #ffffff !important;
         }}
 
         /* ── Tabs ── */
         .stTabs [data-baseweb="tab"] {{
             font-size: {font_size}px !important;
+            background-color: #161B22 !important;
+        }}
+        .stTabs [data-baseweb="tab-list"] {{
+            background-color: #161B22 !important;
         }}
 
         /* ── Metric cards ── */
         [data-testid="metric-container"] {{
-            background-color: #F8F9FA !important;
+            background-color: #1C2128 !important;
+            border: 1px solid #30363D !important;
             border-radius: 8px !important;
             padding: 8px !important;
+        }}
+
+        /* ── Expander ── */
+        details {{
+            background-color: #1C2128 !important;
+            border: 1px solid #30363D !important;
+            border-radius: 6px !important;
+        }}
+        details summary {{
+            background-color: #1C2128 !important;
+        }}
+
+        /* ── Selectbox / dropdown ── */
+        [data-baseweb="select"] * {{
+            background-color: #1C2128 !important;
+            border-color: #30363D !important;
+        }}
+
+        /* ── Sidebar radio buttons ── */
+        [data-testid="stSidebar"] label {{
+            color: #E6EDF3 !important;
+        }}
+
+        /* ── Dividers ── */
+        hr {{
+            border-color: #30363D !important;
         }}
         </style>""",
         unsafe_allow_html=True,
     )
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -255,7 +321,7 @@ def main() -> None:
         sma50_str  = f"{bm['sma50']:.2f}"  if bm["sma50"]  else "N/A"
         sma200_str = f"{bm['sma200']:.2f}" if bm["sma200"] else "N/A"
         st.sidebar.markdown(
-            f"<div style='background:#E8F8EE; border:1px solid #28A745; "
+            f"<div style='background:#0D2E1A; border:1px solid #238636; "
             f"border-radius:6px; padding:8px 10px; font-size:12px;'>"
             f"✅ <b>宏觀多頭（黃金交叉）</b><br>"
             f"SMA50 {sma50_str} &gt; SMA200 {sma200_str}"
@@ -266,7 +332,7 @@ def main() -> None:
         sma50_str  = f"{bm['sma50']:.2f}"  if bm["sma50"]  else "N/A"
         sma200_str = f"{bm['sma200']:.2f}" if bm["sma200"] else "N/A"
         st.sidebar.markdown(
-            f"<div style='background:#FEE8E8; border:1px solid #DC3545; "
+            f"<div style='background:#2D1B1B; border:1px solid #DA3633; "
             f"border-radius:6px; padding:8px 10px; font-size:12px;'>"
             f"⚠️ <b>宏觀空頭（死亡交叉）</b><br>"
             f"SMA50 {sma50_str} &lt; SMA200 {sma200_str}"
@@ -358,25 +424,25 @@ def main() -> None:
 
         if bm.get("golden_cross") is True:
             st.markdown(
-                f"<div style='background:#E8F8EE; border:1.5px solid #28A745; "
+                f"<div style='background:#0D2E1A; border:1.5px solid #238636; "
                 f"border-radius:8px; padding:10px 18px; margin-bottom:12px; font-size:14px;'>"
-                f"✅ &nbsp;<b>市場趨勢：宏觀多頭（黃金交叉）</b>"
+                f"✅ &nbsp;<b style='color:#3FB950;'>市場趨勢：宏觀多頭（黃金交叉）</b>"
                 f"&nbsp;—&nbsp;"
                 f"{bm['label']} ({benchmark})　"
-                f"SMA50 <b>{bm['sma50']:.2f}</b> &gt; "
-                f"SMA200 <b>{bm['sma200']:.2f}</b>"
+                f"SMA50 <b style='color:#E6EDF3;'>{bm['sma50']:.2f}</b> &gt; "
+                f"SMA200 <b style='color:#E6EDF3;'>{bm['sma200']:.2f}</b>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
         elif bm.get("golden_cross") is False:
             st.markdown(
-                f"<div style='background:#FEE8E8; border:1.5px solid #DC3545; "
+                f"<div style='background:#2D1B1B; border:1.5px solid #DA3633; "
                 f"border-radius:8px; padding:10px 18px; margin-bottom:12px; font-size:14px;'>"
-                f"⚠️ &nbsp;<b>市場趨勢：宏觀空頭（死亡交叉）</b>"
+                f"⚠️ &nbsp;<b style='color:#FF7B72;'>市場趨勢：宏觀空頭（死亡交叉）</b>"
                 f"&nbsp;—&nbsp;"
                 f"{bm['label']} ({benchmark})　"
-                f"SMA50 <b>{bm['sma50']:.2f}</b> &lt; "
-                f"SMA200 <b>{bm['sma200']:.2f}</b>"
+                f"SMA50 <b style='color:#E6EDF3;'>{bm['sma50']:.2f}</b> &lt; "
+                f"SMA200 <b style='color:#E6EDF3;'>{bm['sma200']:.2f}</b>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
@@ -423,10 +489,10 @@ def main() -> None:
                 border = "#FF4B4B" if ev["imp"] == "🔴" else "#FFD700" if ev["imp"] == "🟡" else "#00FF7F"
                 _cal_cols[ci % 2].markdown(
                     f"<div style='border-left:4px solid {border}; border-radius:6px; "
-                    f"background:#F8F9FA; padding:10px 14px; margin-bottom:8px;'>"
-                    f"<div style='font-size:12px; color:#888;'>{ev['date']}  ·  {days_str}</div>"
+                    f"background:#1C2128; padding:10px 14px; margin-bottom:8px;'>"
+                    f"<div style='font-size:12px; color:#8B949E;'>{ev['date']}  ·  {days_str}</div>"
                     f"<div style='font-weight:700; font-size:14px;'>{ev['imp']} {ev['event']}</div>"
-                    f"<div style='font-size:12px; color:#555; margin-top:4px;'>{ev['impact']}</div>"
+                    f"<div style='font-size:12px; color:#8B949E; margin-top:4px;'>{ev['impact']}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )

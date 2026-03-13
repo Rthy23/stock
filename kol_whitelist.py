@@ -327,7 +327,7 @@ def render_kol_section(api_key: str = "") -> None:
             with cols[0]:
                 st.markdown(
                     f"**{kol['name']}** &nbsp;·&nbsp; {kol['org']}  \n"
-                    f"<span style='font-size:12px;color:#666;'>{kol['type']}</span>  \n"
+                    f"<span style='font-size:12px;color:#8B949E;'>{kol['type']}</span>  \n"
                     f"**研究方向：** {kol['focus']}  \n"
                     f"**平台：** {kol['platform']}  \n"
                     f"**入選理由：** {kol['rationale']}",
@@ -335,14 +335,14 @@ def render_kol_section(api_key: str = "") -> None:
                 )
             with cols[1]:
                 st.markdown(
-                    f"<div style='text-align:center; background:#F8FAFB; "
-                    f"border:1px solid #dee2e6; border-radius:8px; padding:10px;'>"
-                    f"<div style='font-size:11px; color:#666;'>信譽評分</div>"
+                    f"<div style='text-align:center; background:#1C2128; "
+                    f"border:1px solid #30363D; border-radius:8px; padding:10px;'>"
+                    f"<div style='font-size:11px; color:#8B949E;'>信譽評分</div>"
                     f"<div style='font-size:16px;'>{star_str}</div>"
-                    f"<div style='font-size:11px; color:#666; margin-top:4px;'>"
+                    f"<div style='font-size:11px; margin-top:4px;'>"
                     f"<span style='color:{kol['stance_color']}; font-weight:700;'>{kol['stance']}</span>"
                     f"</div>"
-                    f"<div style='font-size:11px; color:#888;'>活躍 {kol['years_active']}+ 年</div>"
+                    f"<div style='font-size:11px; color:#8B949E;'>活躍 {kol['years_active']}+ 年</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -405,8 +405,8 @@ def _render_consensus_table(picks: List[Dict], max_score: float) -> None:
 
     header_html = """
     <div style='display:grid; grid-template-columns:60px 1fr 120px 80px 90px;
-                gap:8px; background:#F0F4FF; border-radius:6px;
-                padding:8px 12px; font-weight:700; font-size:13px; margin-bottom:4px;'>
+                gap:8px; background:#21262D; border-radius:6px;
+                padding:8px 12px; font-weight:700; font-size:13px; margin-bottom:4px; color:#E6EDF3;'>
       <div>#</div><div>標的</div><div>推薦專家</div><div>一致性</div><div>信心</div>
     </div>"""
     st.markdown(header_html, unsafe_allow_html=True)
@@ -420,17 +420,17 @@ def _render_consensus_table(picks: List[Dict], max_score: float) -> None:
 
         row_html = f"""
         <div style='display:grid; grid-template-columns:60px 1fr 120px 80px 90px;
-                    gap:8px; border-bottom:1px solid #eee;
+                    gap:8px; border-bottom:1px solid #30363D; color:#E6EDF3;
                     padding:8px 12px; font-size:13px; align-items:center;'>
-          <div style='font-weight:700; color:#666;'>#{i}</div>
+          <div style='font-weight:700; color:#8B949E;'>#{i}</div>
           <div>
-            <b style='font-size:15px;'>{p['ticker']}</b>
-            <div style='height:6px; background:#eee; border-radius:3px; margin-top:4px;'>
+            <b style='font-size:15px; color:#E6EDF3;'>{p['ticker']}</b>
+            <div style='height:6px; background:#30363D; border-radius:3px; margin-top:4px;'>
               <div style='height:6px; background:{bar_color};
                           border-radius:3px; width:{score_pct:.0f}%;'></div>
             </div>
           </div>
-          <div style='font-size:11px; color:#555;'>{experts_str[:30]}{"…" if len(experts_str)>30 else ""}</div>
+          <div style='font-size:11px; color:#8B949E;'>{experts_str[:30]}{"…" if len(experts_str)>30 else ""}</div>
           <div style='text-align:center; font-weight:700;'>{consensus} 位</div>
           <div style='text-align:center;'>{star_str}</div>
         </div>"""
@@ -464,20 +464,21 @@ def _render_ai_cards(enhanced: List[Dict]) -> None:
         consensus = p["consensus"]
         experts   = "、".join(set(p["experts"][:3]))
 
-        bg = "#E8F8EE" if conf >= 4 else ("#FFF5E6" if conf >= 3 else "#FEE8E8")
-        bdr = "#28A745" if conf >= 4 else ("#FFA500" if conf >= 3 else "#DC3545")
+        bg  = "#0D2E1A" if conf >= 4 else ("#2D2010" if conf >= 3 else "#2D1B1B")
+        bdr = "#238636" if conf >= 4 else ("#D29922" if conf >= 3 else "#DA3633")
+        title_col = "#3FB950" if conf >= 4 else ("#FFD700" if conf >= 3 else "#FF7B72")
 
         card_html = f"""
         <div style='background:{bg}; border:1px solid {bdr}; border-radius:10px;
                     padding:14px 18px; margin-bottom:12px;'>
           <div style='display:flex; justify-content:space-between; align-items:center;'>
-            <b style='font-size:18px;'>{p['ticker']}</b>
-            <div style='font-size:16px;'>{conf_star} <span style='font-size:12px;color:#666;'>信心 {conf}/5</span></div>
+            <b style='font-size:18px; color:{title_col};'>{p['ticker']}</b>
+            <div style='font-size:16px;'>{conf_star} <span style='font-size:12px;color:#8B949E;'>信心 {conf}/5</span></div>
           </div>
-          <div style='font-size:13px; font-weight:600; margin:8px 0 4px;'>📌 {summary}</div>
-          <div style='font-size:12px; color:#555; margin-bottom:8px;'>{reason}</div>
-          <div style='display:flex; gap:16px; font-size:12px; color:#666;'>
-            <span>👥 一致性：<b>{consensus} 位</b>白名單專家推薦</span>
+          <div style='font-size:13px; font-weight:600; color:#E6EDF3; margin:8px 0 4px;'>📌 {summary}</div>
+          <div style='font-size:12px; color:#8B949E; margin-bottom:8px;'>{reason}</div>
+          <div style='display:flex; gap:16px; font-size:12px; color:#8B949E;'>
+            <span>👥 一致性：<b style='color:#E6EDF3;'>{consensus} 位</b>白名單專家推薦</span>
             <span>🧑‍💼 包含：{experts}</span>
           </div>
         </div>"""

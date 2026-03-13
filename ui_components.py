@@ -489,31 +489,31 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
         buy_limit  = buy_upper if buy_upper else price
         with c1:
             st.markdown(f"""
-            <div style="background:#E8F8EE; border:1px solid #28A745;
+            <div style="background:#0D2E1A; border:1px solid #238636;
                         border-radius:10px; padding:16px; text-align:center;">
-              <div style="font-size:12px; margin-bottom:4px;">🟢 建議買入上限</div>
-              <div style="font-size:22px; font-weight:700;">${buy_limit:.2f}</div>
-              <div style="font-size:13px;">(SMA 50)</div>
+              <div style="font-size:12px; color:#8B949E; margin-bottom:4px;">🟢 建議買入上限</div>
+              <div style="font-size:22px; font-weight:700; color:#3FB950;">${buy_limit:.2f}</div>
+              <div style="font-size:13px; color:#8B949E;">(SMA 50)</div>
             </div>""", unsafe_allow_html=True)
         with c2:
             if stop:
                 st.markdown(f"""
-                <div style="background:#FEE8E8; border:1px solid #DC3545;
+                <div style="background:#2D1B1B; border:1px solid #DA3633;
                             border-radius:10px; padding:16px; text-align:center;">
-                  <div style="font-size:12px; margin-bottom:4px;">🔴 建議止損價</div>
-                  <div style="font-size:22px; font-weight:700;">${stop:.2f}</div>
-                  <div style="font-size:13px;">(SMA200 × 97% 或 20日低 × 98%)</div>
+                  <div style="font-size:12px; color:#8B949E; margin-bottom:4px;">🔴 建議止損價</div>
+                  <div style="font-size:22px; font-weight:700; color:#FF7B72;">${stop:.2f}</div>
+                  <div style="font-size:13px; color:#8B949E;">(SMA200 × 97% 或 20日低 × 98%)</div>
                 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown("資料不足")
         with c3:
             if target:
                 st.markdown(f"""
-                <div style="background:#EEF6FF; border:1px solid #0066CC;
+                <div style="background:#1B2A3D; border:1px solid #1F6FEB;
                             border-radius:10px; padding:16px; text-align:center;">
-                  <div style="font-size:12px; margin-bottom:4px;">🎯 預計目標價</div>
-                  <div style="font-size:22px; font-weight:700;">${target:.2f}</div>
-                  <div style="font-size:13px;">(買入點盈虧比 1:2)</div>
+                  <div style="font-size:12px; color:#8B949E; margin-bottom:4px;">🎯 預計目標價</div>
+                  <div style="font-size:22px; font-weight:700; color:#58A6FF;">${target:.2f}</div>
+                  <div style="font-size:13px; color:#8B949E;">(買入點盈虧比 1:2)</div>
                 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown("資料不足")
@@ -540,11 +540,11 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
                     )
                 with col_ratio:
                     st.markdown(f"""
-                    <div style="background:#FFF5E6; border:1px solid #FFA500;
+                    <div style="background:#2D2010; border:1px solid #D29922;
                                 border-radius:8px; padding:12px; text-align:center;">
-                      <div style="font-size:13px;">風險報酬比</div>
-                      <div style="font-size:20px; font-weight:700;">1 : 2</div>
-                      <div style="font-size:13px;">
+                      <div style="font-size:13px; color:#8B949E;">風險報酬比</div>
+                      <div style="font-size:20px; font-weight:700; color:#FFD700;">1 : 2</div>
+                      <div style="font-size:13px; color:#8B949E;">
                         損 {loss_pct:.1f}% → 獲 {gain_pct:.1f}%
                       </div>
                     </div>""", unsafe_allow_html=True)
@@ -1080,17 +1080,17 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                     bm_lbl  = bm_data.get("label", "ETF")
                     bm_tick = bm_data.get("ticker", "")
                     st.markdown(
-                        f"<div style='background:#E8F8EE; border:1px solid #28A745; "
+                        f"<div style='background:#0D2E1A; border:1px solid #238636; "
                         f"border-radius:7px; padding:10px 12px;'>"
-                        f"<div style='color:#1a6b3a; font-weight:700; font-size:13px;'>"
+                        f"<div style='color:#3FB950; font-weight:700; font-size:13px;'>"
                         f"✅ 黃金交叉</div>"
-                        f"<div style='font-size:13px; margin-top:4px;'>"
+                        f"<div style='font-size:13px; color:#8B949E; margin-top:4px;'>"
                         f"{bm_lbl}<br>{bm_tick}</div>"
-                        f"<hr style='border-color:#c8e6d4; margin:6px 0;'>"
+                        f"<hr style='border-color:#238636; margin:6px 0;'>"
                         f"<div style='font-size:13px;'>"
-                        f"SMA50 &nbsp;<b>{sma50v:.1f}</b><br>"
-                        f"SMA200 <b>{sma200v:.1f}</b></div>"
-                        f"<div style='color:#1a6b3a; font-size:12px; margin-top:4px;'>"
+                        f"SMA50 &nbsp;<b style='color:#E6EDF3;'>{sma50v:.1f}</b><br>"
+                        f"SMA200 <b style='color:#E6EDF3;'>{sma200v:.1f}</b></div>"
+                        f"<div style='color:#3FB950; font-size:12px; margin-top:4px;'>"
                         f"1Y: +{perf:.1f}%</div>"
                         f"</div>",
                         unsafe_allow_html=True,
@@ -1101,18 +1101,18 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                     perf    = bm_data.get("perf_1y", 0) or 0
                     bm_lbl  = bm_data.get("label", "ETF")
                     bm_tick = bm_data.get("ticker", "")
-                    pc      = "#1a6b3a" if perf >= 0 else "#c0392b"
+                    pc      = "#3FB950" if perf >= 0 else "#FF7B72"
                     st.markdown(
-                        f"<div style='background:#FEE8E8; border:1px solid #DC3545; "
+                        f"<div style='background:#2D1B1B; border:1px solid #DA3633; "
                         f"border-radius:7px; padding:10px 12px;'>"
-                        f"<div style='color:#c0392b; font-weight:700; font-size:13px;'>"
+                        f"<div style='color:#FF7B72; font-weight:700; font-size:13px;'>"
                         f"⚠️ 死亡交叉</div>"
-                        f"<div style='font-size:13px; margin-top:4px;'>"
+                        f"<div style='font-size:13px; color:#8B949E; margin-top:4px;'>"
                         f"{bm_lbl}<br>{bm_tick}</div>"
-                        f"<hr style='border-color:#f5c6c6; margin:6px 0;'>"
+                        f"<hr style='border-color:#DA3633; margin:6px 0;'>"
                         f"<div style='font-size:13px;'>"
-                        f"SMA50 &nbsp;<b>{sma50v:.1f}</b><br>"
-                        f"SMA200 <b>{sma200v:.1f}</b></div>"
+                        f"SMA50 &nbsp;<b style='color:#E6EDF3;'>{sma50v:.1f}</b><br>"
+                        f"SMA200 <b style='color:#E6EDF3;'>{sma200v:.1f}</b></div>"
                         f"<div style='color:{pc}; font-size:12px; margin-top:4px;'>"
                         f"1Y: {perf:+.1f}%</div>"
                         f"</div>",
@@ -1129,19 +1129,19 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
             with col_meta:
                 st.markdown("**🎯 情緒細項**")
                 st.markdown(
-                    f"<div style='background:#F8FAFB; border:1px solid #dee2e6; border-radius:7px; padding:10px 12px; font-size:12px;'>"
+                    f"<div style='background:#1C2128; border:1px solid #30363D; border-radius:7px; padding:10px 12px; font-size:12px;'>"
                     f"<div style='display:flex; justify-content:space-between; padding:3px 0;'>"
-                    f"  <span>📰 新聞（40%）</span>"
+                    f"  <span style='color:#8B949E;'>📰 新聞（40%）</span>"
                     f"  <span style='color:{col_n}; font-weight:700;'>{news_score:.0f} ({label_n})</span></div>"
                     f"<div style='display:flex; justify-content:space-between; padding:3px 0;'>"
-                    f"  <span>💬 社交（60%）</span>"
+                    f"  <span style='color:#8B949E;'>💬 社交（60%）</span>"
                     f"  <span style='color:{col_s}; font-weight:700;'>{social_score:.0f} ({label_s})</span></div>"
-                    f"<hr style='border-color:#dee2e6; margin:5px 0;'>"
+                    f"<hr style='border-color:#30363D; margin:5px 0;'>"
                     f"<div style='display:flex; justify-content:space-between; padding:2px 0;'>"
-                    f"  <span style='font-weight:600;'>🎯 綜合</span>"
+                    f"  <span style='font-weight:600; color:#E6EDF3;'>🎯 綜合</span>"
                     f"  <span style='color:{col_c}; font-weight:800; font-size:15px;'>{combined:.0f} ({label_c})</span></div>"
-                    f"<hr style='border-color:#dee2e6; margin:5px 0;'>"
-                    f"<div style='font-size:13px;'>"
+                    f"<hr style='border-color:#30363D; margin:5px 0;'>"
+                    f"<div style='font-size:13px; color:#8B949E;'>"
                     f"🟢 看多 {sd.get('bull_count',0)}&nbsp;&nbsp;"
                     f"🔴 看空 {sd.get('bear_count',0)}&nbsp;&nbsp;"
                     f"共 {sd.get('total',0)} 則</div>"
