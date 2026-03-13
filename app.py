@@ -1,6 +1,9 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # main.py  —  Entry point, page routing, sidebar (美股選股儀表板)
 # ═══════════════════════════════════════════════════════════════════════════════
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
