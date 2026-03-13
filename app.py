@@ -62,58 +62,41 @@ def _get_gemini_key() -> str:
 
 
 def _inject_global_css() -> None:
-    """
-    Inject global CSS:
-    - Default: light theme (white bg, dark text, Inter/Roboto font).
-    - Dark-mode toggle: override to dark palette.
-    - Font-size slider: applied globally.
-    """
-    dark_mode = st.session_state.get("dark_mode", False)
-    font_size = st.session_state.get("font_size", 13)
-
-    if dark_mode:
-        bg_main = "#0E1117"
-        bg_side = "#1A1D2E"
-        txt_col = "#F0F0F0"
-        inp_bg  = "#1A1D2E"
-        inp_bdr = "#3A3D5C"
-        card_bg = "#111827"
-    else:
-        bg_main = "#FFFFFF"
-        bg_side = "#F4F6F8"
-        txt_col = "#111111"
-        inp_bg  = "#FFFFFF"
-        inp_bdr = "#CCCCCC"
-        card_bg = "#F8F9FA"
-
+    """Force white theme with Inter font and full dark-text override."""
+    font_size  = st.session_state.get("font_size", 13)
     font_stack = "'Inter', 'Roboto', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
 
     st.markdown(
         f"""<style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-        /* ── Base ── */
-        html, body, .stApp {{
-            background-color: {bg_main} !important;
-            color: {txt_col} !important;
-            font-family: {font_stack} !important;
-            font-size: {font_size}px !important;
+        /* ── Force white base ── */
+        .stApp {{
+            background-color: #ffffff !important;
+            color: #000000 !important;
+        }}
+        html, body {{
+            background-color: #ffffff !important;
         }}
         section[data-testid="stSidebar"] {{
-            background-color: {bg_side} !important;
-        }}
-        section[data-testid="stSidebar"] * {{
-            font-family: {font_stack} !important;
-            color: {txt_col} !important;
+            background-color: #F4F6F8 !important;
         }}
 
-        /* ── Typography ── */
-        p, span, label, div, li,
-        h1, h2, h3, h4, h5, h6,
-        .stMarkdown, .stCaption, .stText {{
+        /* ── Universal colour + font override ── */
+        * {{
+            color: #333333 !important;
             font-family: {font_stack} !important;
+        }}
+
+        /* ── Line-height fix (prevents text overlapping) ── */
+        div, p, span, li, label, td, th {{
+            line-height: 1.6 !important;
+        }}
+
+        /* ── Font sizes ── */
+        html, body, .stApp, p, span, label, div, li,
+        .stMarkdown, .stCaption, .stText {{
             font-size: {font_size}px !important;
-            color: {txt_col} !important;
         }}
         h1 {{ font-size: {font_size + 10}px !important; font-weight: 700 !important; }}
         h2 {{ font-size: {font_size + 6}px  !important; font-weight: 700 !important; }}
@@ -123,36 +106,31 @@ def _inject_global_css() -> None:
         .stTextInput input, .stNumberInput input,
         .stSelectbox select, .stTextArea textarea,
         input[type="text"], input[type="number"] {{
-            background-color: {inp_bg} !important;
-            color: {txt_col} !important;
-            border-color: {inp_bdr} !important;
-            font-family: {font_stack} !important;
+            background-color: #FFFFFF !important;
+            border-color: #CCCCCC !important;
             font-size: {font_size}px !important;
             border-radius: 6px !important;
         }}
 
-        /* ── Tables / DataFrames ── */
+        /* ── Tables ── */
         .stDataFrame, .dataframe, table {{
-            font-family: {font_stack} !important;
             font-size: {font_size}px !important;
         }}
 
         /* ── Buttons ── */
         .stButton > button {{
-            font-family: {font_stack} !important;
             font-size: {font_size}px !important;
             border-radius: 6px !important;
         }}
 
         /* ── Tabs ── */
         .stTabs [data-baseweb="tab"] {{
-            font-family: {font_stack} !important;
             font-size: {font_size}px !important;
         }}
 
         /* ── Metric cards ── */
         [data-testid="metric-container"] {{
-            background-color: {card_bg} !important;
+            background-color: #F8F9FA !important;
             border-radius: 8px !important;
             padding: 8px !important;
         }}
@@ -167,6 +145,11 @@ def _inject_global_css() -> None:
 def main() -> None:
     init_session()
     _inject_global_css()
+
+    # ── API key gate ──────────────────────────────────────────────────────────
+    _api_key = _get_gemini_key()
+    if not _api_key:
+        st.sidebar.warning("⚠️ GEMINI_API_KEY 未設定，AI 報告功能暫時停用。")
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
     st.sidebar.title("📈 美股選股")
@@ -271,10 +254,10 @@ def main() -> None:
         sma50_str  = f"{bm['sma50']:.2f}"  if bm["sma50"]  else "N/A"
         sma200_str = f"{bm['sma200']:.2f}" if bm["sma200"] else "N/A"
         st.sidebar.markdown(
-            f"<div style='background:#0D2E0D; border:1px solid #00FF7F55; "
+            f"<div style='background:#E8F8EE; border:1px solid #28A745; "
             f"border-radius:6px; padding:8px 10px; font-size:12px;'>"
-            f"✅ <b style='color:#00FF7F;'>宏觀多頭（黃金交叉）</b><br>"
-            f"<span style='color:#aaa;'>SMA50 {sma50_str} &gt; SMA200 {sma200_str}</span>"
+            f"✅ <b>宏觀多頭（黃金交叉）</b><br>"
+            f"SMA50 {sma50_str} &gt; SMA200 {sma200_str}"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -282,10 +265,10 @@ def main() -> None:
         sma50_str  = f"{bm['sma50']:.2f}"  if bm["sma50"]  else "N/A"
         sma200_str = f"{bm['sma200']:.2f}" if bm["sma200"] else "N/A"
         st.sidebar.markdown(
-            f"<div style='background:#2E0D0D; border:1px solid #FF4B4B55; "
+            f"<div style='background:#FEE8E8; border:1px solid #DC3545; "
             f"border-radius:6px; padding:8px 10px; font-size:12px;'>"
-            f"⚠️ <b style='color:#FF4B4B;'>宏觀空頭（死亡交叉）</b><br>"
-            f"<span style='color:#aaa;'>SMA50 {sma50_str} &lt; SMA200 {sma200_str}</span>"
+            f"⚠️ <b>宏觀空頭（死亡交叉）</b><br>"
+            f"SMA50 {sma50_str} &lt; SMA200 {sma200_str}"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -296,11 +279,12 @@ def main() -> None:
         perf = bm["perf_1y"]
         pc   = "#00FF7F" if perf >= 0 else "#FF4B4B"
         sign = "+" if perf >= 0 else ""
+        perf_text_col = "green" if perf >= 0 else "red"
         st.sidebar.markdown(
-            f"<div style='color:#aaa; font-size:11px; margin-top:5px;'>"
+            f"<div style='font-size:11px; margin-top:5px;'>"
             f"{bm['label']}　"
-            f"<b style='color:#00D4FF;'>${bm['price']:.2f}</b>　"
-            f"<span style='color:{pc};'>{sign}{perf:.1f}% (1Y)</span>"
+            f"<b>${bm['price']:.2f}</b>　"
+            f"<span style='color:{perf_text_col};'>{sign}{perf:.1f}% (1Y)</span>"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -373,27 +357,25 @@ def main() -> None:
 
         if bm.get("golden_cross") is True:
             st.markdown(
-                f"<div style='background:linear-gradient(90deg,#0D2E0D,#112911); "
-                f"border:1.5px solid #00FF7F; border-radius:8px; "
-                f"padding:10px 18px; margin-bottom:12px; font-size:14px;'>"
-                f"✅ &nbsp;<b style='color:#00FF7F;'>市場趨勢：宏觀多頭（黃金交叉）</b>"
+                f"<div style='background:#E8F8EE; border:1.5px solid #28A745; "
+                f"border-radius:8px; padding:10px 18px; margin-bottom:12px; font-size:14px;'>"
+                f"✅ &nbsp;<b>市場趨勢：宏觀多頭（黃金交叉）</b>"
                 f"&nbsp;—&nbsp;"
-                f"<span style='color:#aaa;'>{bm['label']} ({benchmark})　"
-                f"SMA50 <b style='color:#fff;'>{bm['sma50']:.2f}</b> &gt; "
-                f"SMA200 <b style='color:#fff;'>{bm['sma200']:.2f}</b></span>"
+                f"{bm['label']} ({benchmark})　"
+                f"SMA50 <b>{bm['sma50']:.2f}</b> &gt; "
+                f"SMA200 <b>{bm['sma200']:.2f}</b>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
         elif bm.get("golden_cross") is False:
             st.markdown(
-                f"<div style='background:linear-gradient(90deg,#2E0D0D,#291111); "
-                f"border:1.5px solid #FF4B4B; border-radius:8px; "
-                f"padding:10px 18px; margin-bottom:12px; font-size:14px;'>"
-                f"⚠️ &nbsp;<b style='color:#FF4B4B;'>市場趨勢：宏觀空頭（死亡交叉）</b>"
+                f"<div style='background:#FEE8E8; border:1.5px solid #DC3545; "
+                f"border-radius:8px; padding:10px 18px; margin-bottom:12px; font-size:14px;'>"
+                f"⚠️ &nbsp;<b>市場趨勢：宏觀空頭（死亡交叉）</b>"
                 f"&nbsp;—&nbsp;"
-                f"<span style='color:#aaa;'>{bm['label']} ({benchmark})　"
-                f"SMA50 <b style='color:#fff;'>{bm['sma50']:.2f}</b> &lt; "
-                f"SMA200 <b style='color:#fff;'>{bm['sma200']:.2f}</b></span>"
+                f"{bm['label']} ({benchmark})　"
+                f"SMA50 <b>{bm['sma50']:.2f}</b> &lt; "
+                f"SMA200 <b>{bm['sma200']:.2f}</b>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
@@ -767,20 +749,20 @@ def main() -> None:
             _oversold_warn = (_is_out_q is False) and (_combined_q < 30)
             if _buy_consensus:
                 st.markdown(
-                    "<div style='background:#0D2E0D; border:2px solid #00FF7F; "
+                    "<div style='background:#E8F8EE; border:2px solid #28A745; "
                     "border-radius:8px; padding:10px 18px; margin-bottom:6px; "
                     "font-size:14px; text-align:center;'>"
-                    "✅ <b style='color:#00FF7F; font-size:15px;'>買入共識訊號</b>"
+                    "✅ <b style='font-size:15px;'>買入共識訊號</b>"
                     "　—　個股相對強勢 + 分析師評級買入，條件同步觸發。"
                     "</div>",
                     unsafe_allow_html=True,
                 )
             elif _oversold_warn:
                 st.markdown(
-                    "<div style='background:#2E1A0D; border:2px solid #FF8C00; "
+                    "<div style='background:#FFF5E6; border:2px solid #FF8C00; "
                     "border-radius:8px; padding:10px 18px; margin-bottom:6px; "
                     "font-size:14px; text-align:center;'>"
-                    "⚠️ <b style='color:#FFA500; font-size:15px;'>超跌警示（補跌風險）</b>"
+                    "⚠️ <b style='font-size:15px;'>超跌警示（補跌風險）</b>"
                     "　—　個股跑輸大盤且市場情緒恐慌，謹防進一步補跌。"
                     "</div>",
                     unsafe_allow_html=True,
@@ -904,22 +886,22 @@ def main() -> None:
                     avg20_val = hist["Volume"].rolling(20).mean().iloc[-1]
                     if is_inst:
                         st.markdown(
-                            f"<div style='background:#2E0D0D; border:1px solid #FF4B4B; "
+                            f"<div style='background:#FEE8E8; border:1px solid #DC3545; "
                             f"border-radius:7px; padding:9px 16px; margin-bottom:8px; font-size:13px;'>"
-                            f"⚠️ <b style='color:#FF4B4B;'>機構級資金活動偵測</b>"
+                            f"⚠️ <b>機構級資金活動偵測</b>"
                             f"　今日成交量為 20 日均量的 "
-                            f"<b style='color:#FF4B4B;'>{vol_ratio:.1f}×</b>"
+                            f"<b>{vol_ratio:.1f}×</b>"
                             f"，異常放量，建議密切關注方向性突破。</div>",
                             unsafe_allow_html=True,
                         )
                     else:
-                        ratio_color = "#00FF7F" if vol_ratio >= 1.2 else "#aaa"
+                        ratio_label = "高" if vol_ratio >= 1.2 else "正常"
                         st.markdown(
-                            f"<div style='background:#13162A; border-radius:7px; "
+                            f"<div style='background:#F4F6F8; border-radius:7px; "
                             f"padding:8px 16px; margin-bottom:8px; font-size:13px;'>"
                             f"今日成交量為 20 日均量的 "
-                            f"<b style='color:{ratio_color};'>{vol_ratio:.2f}×</b>"
-                            f"　（均量：{avg20_val:,.0f}）</div>",
+                            f"<b>{vol_ratio:.2f}×</b>"
+                            f"　（均量：{avg20_val:,.0f}，成交{ratio_label}）</div>",
                             unsafe_allow_html=True,
                         )
                     vm1, vm2, vm3 = st.columns(3)
@@ -1035,12 +1017,13 @@ def main() -> None:
                     pnl_val = (price - pf_buy_price) / pf_buy_price * 100
                     pnl_sym = f"+{pnl_val:.2f}%" if pnl_val >= 0 else f"{pnl_val:.2f}%"
                     pnl_col = "#00FF7F" if pnl_val >= 0 else "#FF4B4B"
+                    pnl_html_col = "green" if pnl_val >= 0 else "red"
                     st.markdown(
-                        f"<div style='background:#1A1D2E; border-radius:6px; "
-                        f"padding:8px 14px; margin-top:8px;'>"
-                        f"目前盈虧：<span style='color:{pnl_col}; font-weight:700; font-size:16px;'>"
+                        f"<div style='background:#F0F8FF; border-left:4px solid {pnl_html_col}; "
+                        f"border-radius:6px; padding:8px 14px; margin-top:8px;'>"
+                        f"目前盈虧：<span style='color:{pnl_html_col}; font-weight:700; font-size:16px;'>"
                         f"{pnl_sym}</span>　｜　"
-                        f"浮動盈虧金額：<span style='color:{pnl_col}; font-weight:700;'>"
+                        f"浮動盈虧金額：<span style='color:{pnl_html_col}; font-weight:700;'>"
                         f"${(price - pf_buy_price) * pf_existing['qty']:+,.2f}</span></div>",
                         unsafe_allow_html=True,
                     )
@@ -1084,23 +1067,23 @@ def main() -> None:
                         r_sign = f"+{stock_ret:.1f}"  if stock_ret  >= 0 else f"{stock_ret:.1f}"
                         if is_out:
                             st.markdown(
-                                f"<div style='background:#0D2E0D; border:1px solid #00FF7F55; "
+                                f"<div style='background:#E8F8EE; border:1px solid #28A745; "
                                 f"border-radius:7px; padding:8px 18px; margin-bottom:6px; font-size:13px;'>"
-                                f"🚀 <b style='color:#00FF7F;'>強於大盤 (Alpha {a_sign}%)</b>"
-                                f"　{ticker} 報酬 <b style='color:#fff;'>{r_sign}%</b>"
+                                f"🚀 <b>強於大盤 (Alpha {a_sign}%)</b>"
+                                f"　{ticker} 報酬 <b>{r_sign}%</b>"
                                 f"　vs {bm_ticker} 報酬"
-                                f" <b style='color:#00D4FF;'>{stock_ret - alpha_pct:+.1f}%</b>"
+                                f" <b>{stock_ret - alpha_pct:+.1f}%</b>"
                                 f"</div>",
                                 unsafe_allow_html=True,
                             )
                         else:
                             st.markdown(
-                                f"<div style='background:#2E1A0D; border:1px solid #FF8C0055; "
+                                f"<div style='background:#FFF5E6; border:1px solid #FF8C00; "
                                 f"border-radius:7px; padding:8px 18px; margin-bottom:6px; font-size:13px;'>"
-                                f"🐢 <b style='color:#FFA500;'>弱於大盤 (Alpha {a_sign}%)</b>"
-                                f"　{ticker} 報酬 <b style='color:#fff;'>{r_sign}%</b>"
+                                f"🐢 <b>弱於大盤 (Alpha {a_sign}%)</b>"
+                                f"　{ticker} 報酬 <b>{r_sign}%</b>"
                                 f"　vs {bm_ticker} 報酬"
-                                f" <b style='color:#00D4FF;'>{stock_ret - alpha_pct:+.1f}%</b>"
+                                f" <b>{stock_ret - alpha_pct:+.1f}%</b>"
                                 f"</div>",
                                 unsafe_allow_html=True,
                             )
@@ -1233,9 +1216,9 @@ def main() -> None:
         if st.session_state.get("bt_from_screener"):
             screened_str = st.session_state.get("bt_tickers", "")
             st.markdown(
-                f"<div style='background:#0D2E0D; border:1px solid #00FF7F55; "
+                f"<div style='background:#E8F8EE; border:1px solid #28A745; "
                 f"border-radius:6px; padding:8px 14px; margin-bottom:10px; font-size:13px;'>"
-                f"✅ 已從篩選器導入股票：<b style='color:#00FF7F;'>{screened_str}</b>　"
+                f"✅ 已從篩選器導入股票：<b>{screened_str}</b>　"
                 f"可在下方修改後執行回測。</div>",
                 unsafe_allow_html=True,
             )
@@ -1421,10 +1404,10 @@ def main() -> None:
             ]:
                 val = f"{preset[k]*100:.0f}%" if k == "stop_loss" else str(preset[k])
                 col_w.markdown(
-                    f"<div style='background:#111827; border-left:3px solid #00D4FF; "
+                    f"<div style='background:#EEF6FF; border-left:3px solid #0066CC; "
                     f"border-radius:6px; padding:10px; text-align:center;'>"
-                    f"<div style='font-size:12px; color:#888;'>{label}</div>"
-                    f"<div style='font-size:18px; font-weight:700; color:#00D4FF;'>{val}</div>"
+                    f"<div style='font-size:12px; color:#555;'>{label}</div>"
+                    f"<div style='font-size:18px; font-weight:700;'>{val}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -1540,8 +1523,8 @@ def main() -> None:
                 dd_periods   = result.get("drawdown_periods", [])
 
                 st.markdown(
-                    f"<div style='background:#0D1A2E; border-radius:8px; padding:8px 14px; "
-                    f"margin-bottom:10px; font-size:13px; color:#00D4FF;'>"
+                    f"<div style='background:#EEF6FF; border-left:4px solid #0066CC; "
+                    f"border-radius:8px; padding:8px 14px; margin-bottom:10px; font-size:13px;'>"
                     f"📊 策略：<b>{strategy_lbl}</b>　"
                     f"標的：<b>{', '.join(tickers_used)}</b>　"
                     f"基準：<b>{bm_ticker}</b>　"
@@ -1619,10 +1602,11 @@ def main() -> None:
                     (mc5, "超額報酬 α",  _fmt_pct(alpha),              alpha_color),
                 ]:
                     col_m.markdown(
-                        f"<div style='background:#111827; border-left:3px solid {color}; "
-                        f"border-radius:6px; padding:12px; text-align:center;'>"
-                        f"<div style='font-size:13px; color:#aaa;'>{title}</div>"
-                        f"<div style='font-size:18px; font-weight:700; color:{color};'>{val}</div>"
+                        f"<div style='background:#F8FAFB; border-left:3px solid {color}; "
+                        f"border-radius:6px; padding:12px; text-align:center; "
+                        f"box-shadow:0 1px 3px rgba(0,0,0,0.08);'>"
+                        f"<div style='font-size:12px; color:#666;'>{title}</div>"
+                        f"<div style='font-size:18px; font-weight:700;'>{val}</div>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -1636,10 +1620,10 @@ def main() -> None:
                     (bc4, f"{bm_ticker} 年化波動",  _fmt_pct(bm_m.get("vol"))),
                 ]:
                     col_b.markdown(
-                        f"<div style='background:#0d1117; border:1px solid #333; "
+                        f"<div style='background:#F4F6F8; border:1px solid #DDD; "
                         f"border-radius:6px; padding:10px; text-align:center;'>"
-                        f"<div style='font-size:13px; color:#888;'>{title}</div>"
-                        f"<div style='font-size:16px; font-weight:600; color:#aaa;'>{val}</div>"
+                        f"<div style='font-size:12px; color:#666;'>{title}</div>"
+                        f"<div style='font-size:16px; font-weight:600;'>{val}</div>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -1719,7 +1703,7 @@ def main() -> None:
                             unsafe_allow_html=True,
                         )
                 else:
-                    st.info("💡 請在 Replit Secrets 中設定 GEMINI_API_KEY 以啟用 AI 分析報告功能。")
+                    st.caption("💡 AI 報告需要有效的 GEMINI_API_KEY 配置。")
 
         # ──────────────────────────────────────────────────────────────────
         # Tab 3 — Technical Indicator Comparison

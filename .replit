@@ -37,3 +37,8 @@ externalPort = 80
 [deployment]
 deploymentTarget = "autoscale"
 run = ["streamlit", "run", "app.py", "--server.port", "5000"]
+
+[userenv]
+
+[userenv.shared]
+AI_INTEGRATIONS_GEMINI_API_KEY = "AIzaSyDEHSkSbs1zCKkLwDYev7SBKc0_RNX_1DQ"

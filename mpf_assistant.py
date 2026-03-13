@@ -935,7 +935,6 @@ def _render_ai_report_tab() -> None:
         st.info("📂 請先輸入您的 MPF 持倉，再生成 AI 分析報告。")
         return
 
-    st.markdown("### 🤖 Gemini AI 智能分析報告")
     st.caption("根據您的 MPF 持倉配置與當前宏觀環境，由 Gemini AI 生成個性化投資建議")
 
     strategy_result = st.session_state.get("mpf_strategy_result")
@@ -1020,25 +1019,44 @@ def render_mpf_page() -> None:
         render_market_alert()
         st.markdown("---")
 
-        tab_ocr, tab_portfolio, tab_rebalance, tab_strategy, tab_ai = st.tabs(
-            ["📸 截圖識別", "📊 持倉透視", "⚖️ 再平衡建議", "🎯 智投建議", "🤖 AI 分析報告"]
-        )
-
-        with tab_ocr:
+        # ── Section 1: OCR Upload ──────────────────────────────────────────
+        with st.container():
+            st.markdown("## 📸 截圖識別")
+            st.caption("上傳 eMPF / 月結單截圖，自動識別持倉資料")
             render_upload_section()
 
-        with tab_portfolio:
+        st.markdown("---")
+
+        # ── Section 2: Portfolio Table ─────────────────────────────────────
+        with st.container():
+            st.markdown("## 📊 持倉透視")
+            st.caption("查看底層 ETF 成分股，手動輸入或修改各基金持倉")
             render_portfolio_table()
 
-        with tab_rebalance:
+        st.markdown("---")
+
+        # ── Section 3: Rebalance ───────────────────────────────────────────
+        with st.container():
+            st.markdown("## ⚖️ 再平衡建議")
+            st.caption("根據目標配置計算每月供款方向")
             render_rebalance_section(
                 monthly_budget=st.session_state.get("mpf_monthly_budget", 2400.0)
             )
 
-        with tab_strategy:
+        st.markdown("---")
+
+        # ── Section 4: Strategy Signals ────────────────────────────────────
+        with st.container():
+            st.markdown("## 🎯 智投建議")
+            st.caption("RS（相對強度）+ SMA 趨勢分析 · 每隻基金獨立量化訊號 · 雙圓餅圖配置對比")
             _render_strategy_tab()
 
-        with tab_ai:
+        st.markdown("---")
+
+        # ── Section 5: AI Report ───────────────────────────────────────────
+        with st.container():
+            st.markdown("## 🤖 AI 分析報告")
+            st.caption("由 Gemini AI 根據您的持倉與量化訊號生成個性化投資建議")
             _render_ai_report_tab()
 
     except Exception as e:
