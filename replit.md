@@ -40,6 +40,15 @@ A Streamlit-based US stock screening and trading dashboard with technical analys
 streamlit run app.py --server.port 5000
 ```
 
+## Recent Changes
+
+- **Tabs → Scrollable layout**: 美股回測 page replaced tabs 1-4 (策略設定/績效報告/技術指標對比/資金流入分析) with scrollable `st.container()` sections; kept only the 🔍 股票篩選 tab.
+- **Gemini AI for 個股診斷**: Section 7 added — "🤖 Gemini AI 個股深度分析" button with `_call_gemini_stock_ai()`.
+- **Gemini AI for 我的持倉**: "🤖 Gemini AI 持倉組合分析" section added after `render_portfolio_dashboard()`.
+- **Error handling**: `generate_quant_report()` in `ocr_module.py` now returns readable error strings for 403 (leaked key) and 429 (quota exceeded) instead of None.
+- **Dark theme fix**: All `background:#E8F8EE / #F4F6F8 / #EEF6FF / #F8FAFB / #F0F8FF / #FFF5E6 / #FEE8E8 / #F0F7FF` HTML divs replaced with dark equivalents (#0D2E1A / #1C2128 / #1B2A3D / #2D1B00 / #2D1B1B). Text colors updated from #555/#666/#1A1A2E to #8B949E/#E6EDF3.
+- **Screener charts**: `paper_bgcolor="#FFFFFF"` and `plot_bgcolor="#F8F9FA"` changed to #0d1117 / #161B22 with dark axis colors.
+
 ## Deployment
 
 Configured for autoscale deployment on Replit.

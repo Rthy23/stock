@@ -213,5 +213,14 @@ def generate_quant_report(metrics: dict, api_key: str) -> str | None:
         resp = model.generate_content(prompt)
         return resp.text.strip()
     except Exception as e:
+        err_str = str(e)
         print(_err("generate_quant_report", e))
+        if "403" in err_str or "leaked" in err_str.lower():
+            return (
+                "❌ Gemini API Key 錯誤（403）：您的 API Key 可能已洩露或無效。\n"
+                "請前往 Google AI Studio 重新申請一組新的 API Key，"
+                "並更新 Replit Secrets 中的 GEMINI_API_KEY。"
+            )
+        if "quota" in err_str.lower() or "429" in err_str:
+            return "❌ API 請求頻率超限（429），請稍後再試。"
         return None

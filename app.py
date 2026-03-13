@@ -51,6 +51,107 @@ def _err(func: str, e: Exception) -> str:
             f"| ERROR: {type(e).__name__}: {e}")
 
 
+_DARK_CARD = "background:#1C2128; border-radius:6px"
+_DARK_GREEN_CARD = "background:#0D2E1A; border-radius:6px"
+_DARK_RED_CARD   = "background:#2D1B1B; border-radius:6px"
+_DARK_BLUE_CARD  = "background:#1B2A3D; border-radius:6px"
+_DARK_AMBER_CARD = "background:#2D1B00; border-radius:6px"
+
+
+def _call_gemini_stock_ai(stock_info: dict, hist, ticker: str, api_key: str) -> str | None:
+    """Generate Gemini AI individual stock analysis."""
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        price        = stock_info.get("price", "N/A")
+        pe           = stock_info.get("pe_ratio", "N/A")
+        net_margin   = round((stock_info.get("net_margin") or 0) * 100, 2)
+        rev_growth   = round((stock_info.get("revenue_growth") or 0) * 100, 2)
+        mkt_cap      = stock_info.get("market_cap", "N/A")
+        eps          = stock_info.get("eps", "N/A")
+        beta         = stock_info.get("beta", "N/A")
+        sector       = stock_info.get("sector", "N/A")
+        name         = stock_info.get("name", ticker)
+        hist_summary = ""
+        if hist is not None and not hist.empty:
+            ret_1y  = round((hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1) * 100, 1)
+            hi_52   = round(float(hist["High"].max()), 2)
+            lo_52   = round(float(hist["Low"].min()),  2)
+            hist_summary = (f"過去1年報酬率：{ret_1y}%，52週高點：${hi_52}，"
+                            f"52週低點：${lo_52}，近期收盤：${hist['Close'].iloc[-1]:.2f}")
+        prompt = (
+            f"你是一位華爾街資深量化分析師，請以繁體中文對以下美股進行深度分析：\n\n"
+            f"【公司】{name}（{ticker}），板塊：{sector}\n"
+            f"【基本面】股價：${price}，P/E：{pe}，市值：${mkt_cap}，"
+            f"EPS：${eps}，Beta：{beta}\n"
+            f"淨利率：{net_margin}%，營收增長：{rev_growth}%\n"
+            f"【歷史表現】{hist_summary}\n\n"
+            f"請提供：\n"
+            f"1. 綜合評分（1-10）及理由\n"
+            f"2. 核心投資亮點（2-3點）\n"
+            f"3. 主要風險因素（2-3點）\n"
+            f"4. 進場時機建議\n"
+            f"5. 目標價位區間及止損建議\n"
+            f"請以結構化格式輸出，每節使用 **粗體標題**，內容精簡但具體。"
+        )
+        model    = genai.GenerativeModel("gemini-2.0-flash")
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        err = str(e)
+        if "403" in err or "leaked" in err.lower():
+            return f"❌ API Key 錯誤：{err}\n請在 Replit Secrets 中更新 GEMINI_API_KEY。"
+        return f"❌ AI分析失敗：{err}"
+
+
+def _call_gemini_portfolio_ai(portfolio: dict, prices: dict, api_key: str) -> str | None:
+    """Generate Gemini AI portfolio analysis."""
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        if not portfolio:
+            return "❌ 投資組合為空，無法生成分析。"
+        rows = []
+        total_cost = total_val = 0
+        for t, data in portfolio.items():
+            buy = data.get("buy_price", 0)
+            qty = data.get("qty", 0)
+            cur = prices.get(t, buy)
+            pnl_pct = (cur - buy) / buy * 100 if buy else 0
+            cost    = buy * qty
+            val     = cur * qty
+            total_cost += cost
+            total_val  += val
+            rows.append(
+                f"  {t}: 買入${buy:.2f}×{qty}股，現價${cur:.2f}，"
+                f"盈虧{pnl_pct:+.1f}%，市值${val:,.0f}"
+            )
+        total_pnl = (total_val - total_cost) / total_cost * 100 if total_cost else 0
+        holdings_txt = "\n".join(rows)
+        prompt = (
+            f"你是一位華爾街資深投資組合經理，請以繁體中文對以下持倉進行深度分析：\n\n"
+            f"【投資組合總覽】\n"
+            f"總成本：${total_cost:,.0f}，現值：${total_val:,.0f}，"
+            f"整體盈虧：{total_pnl:+.1f}%\n\n"
+            f"【個股持倉明細】\n{holdings_txt}\n\n"
+            f"請提供：\n"
+            f"1. 整體組合評估（分散度、風險集中度）\n"
+            f"2. 表現最佳與最差持倉分析\n"
+            f"3. 組合再平衡建議（哪些應加碼、減碼或停損）\n"
+            f"4. 宏觀環境下的整體風險提示\n"
+            f"5. 下一步行動建議（具體可執行）\n"
+            f"請以結構化格式輸出，每節使用 **粗體標題**，內容精簡但具體。"
+        )
+        model    = genai.GenerativeModel("gemini-2.0-flash")
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        err = str(e)
+        if "403" in err or "leaked" in err.lower():
+            return f"❌ API Key 錯誤：{err}\n請在 Replit Secrets 中更新 GEMINI_API_KEY。"
+        return f"❌ AI分析失敗：{err}"
+
+
 def _get_gemini_key() -> str:
     """Read Gemini API key exclusively from st.secrets / environment. No UI input."""
     try:
@@ -689,7 +790,7 @@ def main() -> None:
             st.markdown(
                 f"<div style='background:#0A0D1A; border:1px solid #2A2D3E; "
                 f"border-radius:8px; padding:10px 18px; margin-bottom:6px;'>"
-                f"<span style='color:#666; font-size:11px;'>⚡ 決策速查表　更新時間 {_ts}</span>"
+                f"<span style='color:#8B949E; font-size:11px;'>⚡ 決策速查表　更新時間 {_ts}</span>"
                 f"<div style='display:flex; gap:40px; margin-top:8px;'>"
                 f"  <div><span style='color:#aaa; font-size:11px;'>大盤趨勢</span><br>"
                 f"    <span style='color:{_gc_color}; font-size:14px; font-weight:700;'>"
@@ -718,9 +819,9 @@ def main() -> None:
             _oversold_warn = (_is_out_q is False) and (_combined_q < 30)
             if _buy_consensus:
                 st.markdown(
-                    "<div style='background:#E8F8EE; border:2px solid #28A745; "
+                    "<div style='background:#0D2E1A; border:2px solid #238636; "
                     "border-radius:8px; padding:10px 18px; margin-bottom:6px; "
-                    "font-size:14px; text-align:center;'>"
+                    "font-size:14px; text-align:center; color:#E6EDF3;'>"
                     "✅ <b style='font-size:15px;'>買入共識訊號</b>"
                     "　—　個股相對強勢 + 分析師評級買入，條件同步觸發。"
                     "</div>",
@@ -728,9 +829,9 @@ def main() -> None:
                 )
             elif _oversold_warn:
                 st.markdown(
-                    "<div style='background:#FFF5E6; border:2px solid #FF8C00; "
+                    "<div style='background:#2D1B00; border:2px solid #D29922; "
                     "border-radius:8px; padding:10px 18px; margin-bottom:6px; "
-                    "font-size:14px; text-align:center;'>"
+                    "font-size:14px; text-align:center; color:#E6EDF3;'>"
                     "⚠️ <b style='font-size:15px;'>超跌警示（補跌風險）</b>"
                     "　—　個股跑輸大盤且市場情緒恐慌，謹防進一步補跌。"
                     "</div>",
@@ -855,8 +956,8 @@ def main() -> None:
                     avg20_val = hist["Volume"].rolling(20).mean().iloc[-1]
                     if is_inst:
                         st.markdown(
-                            f"<div style='background:#FEE8E8; border:1px solid #DC3545; "
-                            f"border-radius:7px; padding:9px 16px; margin-bottom:8px; font-size:13px;'>"
+                            f"<div style='background:#2D1B1B; border:1px solid #DA3633; "
+                            f"border-radius:7px; padding:9px 16px; margin-bottom:8px; font-size:13px; color:#E6EDF3;'>"
                             f"⚠️ <b>機構級資金活動偵測</b>"
                             f"　今日成交量為 20 日均量的 "
                             f"<b>{vol_ratio:.1f}×</b>"
@@ -866,8 +967,8 @@ def main() -> None:
                     else:
                         ratio_label = "高" if vol_ratio >= 1.2 else "正常"
                         st.markdown(
-                            f"<div style='background:#F4F6F8; border-radius:7px; "
-                            f"padding:8px 16px; margin-bottom:8px; font-size:13px;'>"
+                            f"<div style='background:#1C2128; border-radius:7px; "
+                            f"padding:8px 16px; margin-bottom:8px; font-size:13px; color:#E6EDF3;'>"
                             f"今日成交量為 20 日均量的 "
                             f"<b>{vol_ratio:.2f}×</b>"
                             f"　（均量：{avg20_val:,.0f}，成交{ratio_label}）</div>",
@@ -986,10 +1087,10 @@ def main() -> None:
                     pnl_val = (price - pf_buy_price) / pf_buy_price * 100
                     pnl_sym = f"+{pnl_val:.2f}%" if pnl_val >= 0 else f"{pnl_val:.2f}%"
                     pnl_col = "#00FF7F" if pnl_val >= 0 else "#FF4B4B"
-                    pnl_html_col = "green" if pnl_val >= 0 else "red"
+                    pnl_html_col = "#00FF7F" if pnl_val >= 0 else "#FF4B4B"
                     st.markdown(
-                        f"<div style='background:#F0F8FF; border-left:4px solid {pnl_html_col}; "
-                        f"border-radius:6px; padding:8px 14px; margin-top:8px;'>"
+                        f"<div style='background:#1C2128; border-left:4px solid {pnl_html_col}; "
+                        f"border-radius:6px; padding:8px 14px; margin-top:8px; color:#E6EDF3;'>"
                         f"目前盈虧：<span style='color:{pnl_html_col}; font-weight:700; font-size:16px;'>"
                         f"{pnl_sym}</span>　｜　"
                         f"浮動盈虧金額：<span style='color:{pnl_html_col}; font-weight:700;'>"
@@ -1036,8 +1137,8 @@ def main() -> None:
                         r_sign = f"+{stock_ret:.1f}"  if stock_ret  >= 0 else f"{stock_ret:.1f}"
                         if is_out:
                             st.markdown(
-                                f"<div style='background:#E8F8EE; border:1px solid #28A745; "
-                                f"border-radius:7px; padding:8px 18px; margin-bottom:6px; font-size:13px;'>"
+                                f"<div style='background:#0D2E1A; border:1px solid #238636; "
+                                f"border-radius:7px; padding:8px 18px; margin-bottom:6px; font-size:13px; color:#E6EDF3;'>"
                                 f"🚀 <b>強於大盤 (Alpha {a_sign}%)</b>"
                                 f"　{ticker} 報酬 <b>{r_sign}%</b>"
                                 f"　vs {bm_ticker} 報酬"
@@ -1047,8 +1148,8 @@ def main() -> None:
                             )
                         else:
                             st.markdown(
-                                f"<div style='background:#FFF5E6; border:1px solid #FF8C00; "
-                                f"border-radius:7px; padding:8px 18px; margin-bottom:6px; font-size:13px;'>"
+                                f"<div style='background:#2D1B00; border:1px solid #D29922; "
+                                f"border-radius:7px; padding:8px 18px; margin-bottom:6px; font-size:13px; color:#E6EDF3;'>"
                                 f"🐢 <b>弱於大盤 (Alpha {a_sign}%)</b>"
                                 f"　{ticker} 報酬 <b>{r_sign}%</b>"
                                 f"　vs {bm_ticker} 報酬"
@@ -1088,7 +1189,7 @@ def main() -> None:
             _analyst_ts = datetime.now().strftime("%H:%M:%S")
             st.markdown(
                 f"### 🏦 分析師共識評級 & 目標價分析"
-                f"<span style='color:#555; font-size:12px; margin-left:12px;'>"
+                f"<span style='color:#8B949E; font-size:12px; margin-left:12px;'>"
                 f"⏱ 資料載入時間 {_analyst_ts}</span>",
                 unsafe_allow_html=True,
             )
@@ -1167,12 +1268,72 @@ def main() -> None:
             except Exception:
                 st.caption("⏳ 分析師數據暫時不可用，請稍後再試。")
 
+            # ── Section 7: Gemini AI Stock Analysis ─────────────────────────
+            st.markdown("---")
+            st.markdown("### 🤖 Gemini AI 個股深度分析")
+            _ai_key = _get_gemini_key()
+            if _ai_key:
+                if st.button("✨ 生成 AI 分析報告", key=f"diag_ai_btn_{ticker}",
+                             type="primary"):
+                    with st.spinner(f"正在調用 Gemini AI 分析 {ticker}…"):
+                        _ai_text = _call_gemini_stock_ai(stock_info, hist, ticker, _ai_key)
+                    st.session_state[f"diag_ai_report_{ticker}"] = _ai_text
+                if st.session_state.get(f"diag_ai_report_{ticker}"):
+                    _report = st.session_state[f"diag_ai_report_{ticker}"]
+                    if _report.startswith("❌"):
+                        st.error(_report)
+                    else:
+                        st.markdown(
+                            f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
+                            f"border-radius:8px; padding:16px; font-size:14px; "
+                            f"color:#E6EDF3; line-height:1.8;'>{_report}</div>",
+                            unsafe_allow_html=True,
+                        )
+            else:
+                st.caption("💡 AI 分析需要有效的 GEMINI_API_KEY，請在 Secrets 中配置。")
+
     # ══════════════════════════════════════════════════════════════════════════
     # PAGE 3 — Portfolio Dashboard
     # ══════════════════════════════════════════════════════════════════════════
     elif page == "💼 我的持倉":
         with st.spinner("正在更新持倉市值…"):
             render_portfolio_dashboard()
+
+        # ── Gemini AI Portfolio Analysis ────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 🤖 Gemini AI 持倉組合分析")
+        _pf_ai_key = _get_gemini_key()
+        if _pf_ai_key:
+            _pf_data = st.session_state.get("portfolio", {})
+            if _pf_data:
+                if st.button("✨ 生成 AI 投組分析", key="pf_ai_btn", type="primary"):
+                    with st.spinner("正在調用 Gemini AI 分析持倉組合…"):
+                        import yfinance as _yf_pf
+                        _pf_prices = {}
+                        for _t in _pf_data:
+                            try:
+                                _ph = _yf_pf.Ticker(_t).history(period="1d")
+                                if not _ph.empty:
+                                    _pf_prices[_t] = float(_ph["Close"].iloc[-1])
+                            except Exception:
+                                _pf_prices[_t] = _pf_data[_t].get("buy_price", 0)
+                        _pf_ai_text = _call_gemini_portfolio_ai(_pf_data, _pf_prices, _pf_ai_key)
+                    st.session_state["pf_ai_report"] = _pf_ai_text
+                if st.session_state.get("pf_ai_report"):
+                    _pf_report = st.session_state["pf_ai_report"]
+                    if _pf_report.startswith("❌"):
+                        st.error(_pf_report)
+                    else:
+                        st.markdown(
+                            f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
+                            f"border-radius:8px; padding:16px; font-size:14px; "
+                            f"color:#E6EDF3; line-height:1.8;'>{_pf_report}</div>",
+                            unsafe_allow_html=True,
+                        )
+            else:
+                st.info("💡 尚無持倉數據，請先在「個股診斷」頁面添加股票到投資組合。")
+        else:
+            st.caption("💡 AI 分析需要有效的 GEMINI_API_KEY，請在 Secrets 中配置。")
 
     # ══════════════════════════════════════════════════════════════════════════
     # PAGE 4 — Backtest  (RSI strategy + multi-stock + Gemini + tech analysis)
@@ -1185,17 +1346,15 @@ def main() -> None:
         if st.session_state.get("bt_from_screener"):
             screened_str = st.session_state.get("bt_tickers", "")
             st.markdown(
-                f"<div style='background:#E8F8EE; border:1px solid #28A745; "
-                f"border-radius:6px; padding:8px 14px; margin-bottom:10px; font-size:13px;'>"
+                f"<div style='background:#0D2E1A; border:1px solid #238636; "
+                f"border-radius:6px; padding:8px 14px; margin-bottom:10px; font-size:13px; color:#E6EDF3;'>"
                 f"✅ 已從篩選器導入股票：<b>{screened_str}</b>　"
                 f"可在下方修改後執行回測。</div>",
                 unsafe_allow_html=True,
             )
             st.session_state["bt_from_screener"] = False
 
-        tab0, tab1, tab2, tab3, tab4 = st.tabs(
-            ["🔍 股票篩選", "⚙️ 策略設定", "📈 績效報告", "📉 技術指標對比", "💹 資金流入分析"]
-        )
+        (tab0,) = st.tabs(["🔍 股票篩選"])
 
         # ──────────────────────────────────────────────────────────────────
         # Tab 0 — Stock Screener (migrated from Macro page)
@@ -1270,7 +1429,7 @@ def main() -> None:
                         navigate_to_diagnosis(stock)
                     rcols[1].markdown(f"<span style='font-size:13px;'>{stock['name']}</span>",
                                       unsafe_allow_html=True)
-                    rcols[2].markdown(f"<span style='color:#666; font-size:12px;'>{stock['sector']}</span>",
+                    rcols[2].markdown(f"<span style='color:#8B949E; font-size:12px;'>{stock['sector']}</span>",
                                       unsafe_allow_html=True)
                     rcols[3].markdown(f"<span style='font-size:13px;'>{format_market_cap(stock['market_cap'])}</span>",
                                       unsafe_allow_html=True)
@@ -1297,7 +1456,7 @@ def main() -> None:
                 sc_tickers = [s["ticker"] for s in results]
                 sc_bt1, sc_bt2 = st.columns([3, 1])
                 with sc_bt1:
-                    st.info(f"📊 篩選出 **{len(sc_tickers)}** 支股票，可切換至「⚙️ 策略設定」頁籤執行批量回測")
+                    st.info(f"📊 篩選出 **{len(sc_tickers)}** 支股票，可向下滾動至「⚙️ 策略設定」執行批量回測")
                 with sc_bt2:
                     if st.button("🚀 送往回測", type="primary",
                                  key="sc_to_bt", use_container_width=True):
@@ -1316,9 +1475,15 @@ def main() -> None:
                             color="market_cap", color_continuous_scale="Blues",
                             labels={"market_cap": "市值 (USD)", "ticker": "代碼"},
                         )
-                        fig_cap.update_layout(paper_bgcolor="#FFFFFF", plot_bgcolor="#F8F9FA",
-                                              showlegend=False, margin=dict(t=40, b=20))
-                        fig_cap.update_yaxes(tickformat=".2s")
+                        fig_cap.update_layout(
+                            paper_bgcolor="#0d1117", plot_bgcolor="#161B22",
+                            font=dict(color="#ddd"),
+                            showlegend=False, margin=dict(t=40, b=20),
+                        )
+                        fig_cap.update_yaxes(tickformat=".2s",
+                                             tickfont=dict(color="#aaa"),
+                                             gridcolor="#2a2a3a")
+                        fig_cap.update_xaxes(tickfont=dict(color="#aaa"))
                         st.plotly_chart(fig_cap, use_container_width=True)
                     with c2:
                         fig_sc = px.scatter(
@@ -1330,8 +1495,13 @@ def main() -> None:
                                     "revenue_growth": "營收增長"},
                             color_continuous_scale="Teal",
                         )
-                        fig_sc.update_layout(paper_bgcolor="#FFFFFF", plot_bgcolor="#F8F9FA",
-                                             margin=dict(t=40, b=20))
+                        fig_sc.update_layout(
+                            paper_bgcolor="#0d1117", plot_bgcolor="#161B22",
+                            font=dict(color="#ddd"),
+                            margin=dict(t=40, b=20),
+                        )
+                        fig_sc.update_xaxes(tickfont=dict(color="#aaa"), gridcolor="#2a2a3a")
+                        fig_sc.update_yaxes(tickfont=dict(color="#aaa"), gridcolor="#2a2a3a")
                         st.plotly_chart(fig_sc, use_container_width=True)
                 except Exception as _ce:
                     st.warning(f"⚠️ 圖表加載失敗：{_ce}")
@@ -1351,9 +1521,11 @@ def main() -> None:
                     """)
 
         # ──────────────────────────────────────────────────────────────────
-        # Tab 1 — Strategy Setup
+        # Section 1 — Strategy Setup  (scrollable)
         # ──────────────────────────────────────────────────────────────────
-        with tab1:
+        st.markdown("---")
+        st.markdown("## ⚙️ 策略設定")
+        with st.container():
             st.markdown("### 📌 資產類別與 RSI 參數")
 
             asset_class = st.radio(
@@ -1373,10 +1545,10 @@ def main() -> None:
             ]:
                 val = f"{preset[k]*100:.0f}%" if k == "stop_loss" else str(preset[k])
                 col_w.markdown(
-                    f"<div style='background:#EEF6FF; border-left:3px solid #0066CC; "
+                    f"<div style='background:#1B2A3D; border-left:3px solid #1F6FEB; "
                     f"border-radius:6px; padding:10px; text-align:center;'>"
-                    f"<div style='font-size:12px; color:#555;'>{label}</div>"
-                    f"<div style='font-size:18px; font-weight:700;'>{val}</div>"
+                    f"<div style='font-size:12px; color:#8B949E;'>{label}</div>"
+                    f"<div style='font-size:18px; font-weight:700; color:#E6EDF3;'>{val}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -1460,14 +1632,16 @@ def main() -> None:
                         )
                     st.session_state["bt_result"] = result
                     if not result.get("error"):
-                        st.success("✅ 回測完成！請切換至「績效報告」頁籤查看結果。")
+                        st.success("✅ 回測完成！請向下滾動查看「績效報告」。")
                     else:
                         st.error(f"⚠️ 回測失敗：{result['error']}")
 
         # ──────────────────────────────────────────────────────────────────
-        # Tab 2 — Performance Report
+        # Section 2 — Performance Report  (scrollable)
         # ──────────────────────────────────────────────────────────────────
-        with tab2:
+        st.markdown("---")
+        st.markdown("## 📈 績效報告")
+        with st.container():
             def _fmt_pct(v):
                 return f"{v*100:+.2f}%" if v is not None else "N/A"
             def _fmt_f(v, decimals=2):
@@ -1475,7 +1649,7 @@ def main() -> None:
 
             result = st.session_state.get("bt_result")
             if not result:
-                st.info("💡 請先在「策略設定」頁籤設定參數並執行回測。")
+                st.info("💡 請先在上方「策略設定」設定參數並執行回測。")
             elif result.get("error"):
                 st.error(f"⚠️ 回測失敗：{result['error']}")
             else:
@@ -1492,8 +1666,8 @@ def main() -> None:
                 dd_periods   = result.get("drawdown_periods", [])
 
                 st.markdown(
-                    f"<div style='background:#EEF6FF; border-left:4px solid #0066CC; "
-                    f"border-radius:8px; padding:8px 14px; margin-bottom:10px; font-size:13px;'>"
+                    f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
+                    f"border-radius:8px; padding:8px 14px; margin-bottom:10px; font-size:13px; color:#E6EDF3;'>"
                     f"📊 策略：<b>{strategy_lbl}</b>　"
                     f"標的：<b>{', '.join(tickers_used)}</b>　"
                     f"基準：<b>{bm_ticker}</b>　"
@@ -1571,11 +1745,10 @@ def main() -> None:
                     (mc5, "超額報酬 α",  _fmt_pct(alpha),              alpha_color),
                 ]:
                     col_m.markdown(
-                        f"<div style='background:#F8FAFB; border-left:3px solid {color}; "
-                        f"border-radius:6px; padding:12px; text-align:center; "
-                        f"box-shadow:0 1px 3px rgba(0,0,0,0.08);'>"
-                        f"<div style='font-size:12px; color:#666;'>{title}</div>"
-                        f"<div style='font-size:18px; font-weight:700;'>{val}</div>"
+                        f"<div style='background:#1C2128; border-left:3px solid {color}; "
+                        f"border-radius:6px; padding:12px; text-align:center;'>"
+                        f"<div style='font-size:12px; color:#8B949E;'>{title}</div>"
+                        f"<div style='font-size:18px; font-weight:700; color:#E6EDF3;'>{val}</div>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -1589,10 +1762,10 @@ def main() -> None:
                     (bc4, f"{bm_ticker} 年化波動",  _fmt_pct(bm_m.get("vol"))),
                 ]:
                     col_b.markdown(
-                        f"<div style='background:#F4F6F8; border:1px solid #DDD; "
+                        f"<div style='background:#1C2128; border:1px solid #30363D; "
                         f"border-radius:6px; padding:10px; text-align:center;'>"
-                        f"<div style='font-size:12px; color:#666;'>{title}</div>"
-                        f"<div style='font-size:16px; font-weight:600;'>{val}</div>"
+                        f"<div style='font-size:12px; color:#8B949E;'>{title}</div>"
+                        f"<div style='font-size:16px; font-weight:600; color:#E6EDF3;'>{val}</div>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -1662,26 +1835,31 @@ def main() -> None:
                             st.session_state["bt_gemini_report"] = report_text
                         else:
                             st.warning("AI 報告生成失敗，請確認 GEMINI_API_KEY 已正確設定於 Secrets。")
-                    if st.session_state.get("bt_gemini_report"):
-                        st.markdown(
-                            f"<div style='background:#F0F7FF; border-left:4px solid #0066CC; "
-                            f"border-radius:8px; padding:16px; font-size:14px; "
-                            f"color:#1A1A2E; line-height:1.8;'>"
-                            f"{st.session_state['bt_gemini_report']}"
-                            f"</div>",
-                            unsafe_allow_html=True,
-                        )
+                    _bt_report = st.session_state.get("bt_gemini_report")
+                    if _bt_report:
+                        if _bt_report.startswith("❌"):
+                            st.error(_bt_report)
+                        else:
+                            st.markdown(
+                                f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
+                                f"border-radius:8px; padding:16px; font-size:14px; "
+                                f"color:#E6EDF3; line-height:1.8;'>"
+                                f"{_bt_report}"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
                 else:
                     st.caption("💡 AI 報告需要有效的 GEMINI_API_KEY 配置。")
 
         # ──────────────────────────────────────────────────────────────────
-        # Tab 3 — Technical Indicator Comparison
+        # Section 3 — Technical Indicator Comparison  (scrollable)
         # ──────────────────────────────────────────────────────────────────
-        with tab3:
-            st.markdown("### 📉 技術指標對比")
+        st.markdown("---")
+        st.markdown("## 📉 技術指標對比")
+        with st.container():
             result = st.session_state.get("bt_result")
             if not result or result.get("error"):
-                st.info("💡 請先在「策略設定」完成回測。")
+                st.info("💡 請先在上方「策略設定」完成回測。")
             else:
                 tickers_used = result["pf_tickers"]
                 years_used   = result.get("window_years", 3)
@@ -1808,10 +1986,11 @@ def main() -> None:
                         st.plotly_chart(fig_bb, use_container_width=True)
 
         # ──────────────────────────────────────────────────────────────────
-        # Tab 4 — Fund Flow Analysis
+        # Section 4 — Fund Flow Analysis  (scrollable)
         # ──────────────────────────────────────────────────────────────────
-        with tab4:
-            st.markdown("### 💹 資金流入分析")
+        st.markdown("---")
+        st.markdown("## 💹 資金流入分析")
+        with st.container():
             st.caption("OBV（能量潮）反映資金累積趨勢；MFI（資金流量指標）衡量買賣力道強弱")
             result = st.session_state.get("bt_result")
             if not result or result.get("error"):
