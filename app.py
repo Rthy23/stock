@@ -1220,11 +1220,11 @@ def main() -> None:
 
             asset_class = st.radio(
                 "資產類別（自動調整 RSI 閾值）",
-                list(be.RSI_PRESETS.keys()),
+                list(be.get_rsi_presets().keys()),
                 horizontal=True,
                 key="bt_asset_class",
             )
-            preset = be.RSI_PRESETS[asset_class]
+            preset = be.get_rsi_presets()[asset_class]
 
             preset_info_cols = st.columns(4)
             for col_w, k, label in [
@@ -1544,9 +1544,9 @@ def main() -> None:
 
                 if indicator == "RSI":
                     fig_rsi = go.Figure()
-                    preset_now = be.RSI_PRESETS.get(
+                    preset_now = be.get_rsi_presets().get(
                         st.session_state.get("bt_asset_class", "自定義"),
-                        be.RSI_PRESETS["自定義"]
+                        be.get_rsi_presets()["自定義"]
                     )
                     for i, t in enumerate(tickers_used):
                         with st.spinner(f"載入 {t} RSI…"):

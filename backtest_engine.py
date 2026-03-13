@@ -16,12 +16,17 @@ def _err(func: str, e: Exception) -> str:
 
 
 # ── RSI preset thresholds by asset class ──────────────────────────────────────
-RSI_PRESETS: dict[str, dict] = {
-    "科技股":   {"buy": 30, "sell": 70, "sma_period": 200, "stop_loss": 0.12},
-    "高波動股": {"buy": 25, "sell": 75, "sma_period": 200, "stop_loss": 0.15},
-    "防禦型股票":{"buy": 40, "sell": 60, "sma_period": 200, "stop_loss": 0.08},
-    "自定義":   {"buy": 30, "sell": 70, "sma_period": 200, "stop_loss": 0.10},
+_RSI_PRESETS_DATA: dict[str, dict] = {
+    "科技股":    {"buy": 30, "sell": 70, "sma_period": 200, "stop_loss": 0.12},
+    "高波動股":  {"buy": 25, "sell": 75, "sma_period": 200, "stop_loss": 0.15},
+    "防禦型股票": {"buy": 40, "sell": 60, "sma_period": 200, "stop_loss": 0.08},
+    "自定義":    {"buy": 30, "sell": 70, "sma_period": 200, "stop_loss": 0.10},
 }
+
+
+def get_rsi_presets() -> dict[str, dict]:
+    """Return a copy of all RSI preset configurations keyed by asset class."""
+    return dict(_RSI_PRESETS_DATA)
 
 
 # ── Data fetching ─────────────────────────────────────────────────────────────
