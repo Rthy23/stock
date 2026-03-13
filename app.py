@@ -43,6 +43,10 @@ import backtest_engine as be
 from mpf_assistant import render_mpf_page
 from kol_whitelist import render_kol_section
 from ocr_module import generate_quant_report
+from notifier import (
+    run_all_checks, get_current_prices,
+    load_notification_log, send_telegram_notification,
+)
 
 _MODULE = "main"
 
@@ -161,6 +165,26 @@ def _get_gemini_key() -> str:
     except Exception:
         pass
     return os.environ.get("GEMINI_API_KEY", "")
+
+
+def _get_telegram_creds() -> tuple[str, str]:
+    """Return (bot_token, chat_id) from st.secrets or env vars."""
+    try:
+        token   = st.secrets.get("TELEGRAM_BOT_TOKEN", "")
+        chat_id = st.secrets.get("TELEGRAM_USER_ID", "")
+        if token and chat_id:
+            return token, str(chat_id)
+    except Exception:
+        pass
+    return (
+        os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        os.environ.get("TELEGRAM_USER_ID", ""),
+    )
+
+
+def _telegram_configured() -> bool:
+    t, c = _get_telegram_creds()
+    return bool(t and c)
 
 
 def _inject_global_css() -> None:
@@ -396,6 +420,51 @@ def main() -> None:
         )
     params = (min_cap, min_margin, min_growth, max_pe)
 
+    # ── Telegram notification settings ────────────────────────────────────────
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("📱 Telegram 即時通知", expanded=False):
+        _tg_ok = _telegram_configured()
+        if _tg_ok:
+            st.success("✅ Telegram 已連接")
+        else:
+            st.warning("⚠️ 請在 Secrets 中設定 TELEGRAM_BOT_TOKEN 及 TELEGRAM_USER_ID")
+
+        alert_threshold = st.slider(
+            "止盈/止損閾值 (%)",
+            min_value=5, max_value=30, value=10, step=1,
+            help="持倉漲跌超過此百分比時觸發通知",
+            key="tg_threshold",
+        )
+        auto_check = st.toggle(
+            "開盤後自動檢查（首次訪問觸發）",
+            value=False, key="tg_auto_check",
+        )
+        st.caption("每項警報有 4 小時冷卻期，避免重複推送")
+
+        if _tg_ok:
+            if st.button("📤 發送測試訊息", key="tg_test", use_container_width=True):
+                _tok, _cid = _get_telegram_creds()
+                _ok = send_telegram_notification(
+                    _tok, _cid,
+                    "✅ *美股選股儀表板* — Telegram 通知連接測試成功！\n"
+                    "您的即時警報服務已就緒。",
+                )
+                if _ok:
+                    st.success("測試訊息已發送！")
+                else:
+                    st.error("發送失敗，請確認 Bot Token 和 User ID 正確。")
+
+            if st.button("🔍 立即執行全面檢查", key="tg_run_now",
+                         use_container_width=True, type="primary"):
+                st.session_state["tg_run_checks"] = True
+                st.rerun()
+        else:
+            st.info("💡 設定步驟：\n1. 向 @BotFather 申請 Bot Token\n"
+                    "2. 向 @userinfobot 取得您的 User ID\n"
+                    "3. 在 Replit Secrets 中設定\n"
+                    "   TELEGRAM_BOT_TOKEN\n"
+                    "   TELEGRAM_USER_ID")
+
     # ── Benchmark monitor ─────────────────────────────────────────────────────
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📊 大盤監測儀")
@@ -456,6 +525,49 @@ def main() -> None:
             f"</div>",
             unsafe_allow_html=True,
         )
+
+    # ── Telegram auto / manual check trigger ──────────────────────────────────
+    _run_now = st.session_state.pop("tg_run_checks", False)
+    _auto_ok = (
+        st.session_state.get("tg_auto_check", False)
+        and _telegram_configured()
+        and not st.session_state.get("tg_auto_done_today", False)
+    )
+    if (_run_now or _auto_ok) and _telegram_configured():
+        _tg_tok, _tg_cid  = _get_telegram_creds()
+        _tg_gem           = _get_gemini_key()
+        _tg_portfolio     = st.session_state.get("portfolio", {})
+        _tg_watchlist     = st.session_state.get("watchlist", [])
+        _tg_threshold     = st.session_state.get("tg_threshold", 10)
+        _tg_prices        = get_current_prices(list(_tg_portfolio.keys()))
+        _tg_fear          = None
+        _tg_golden        = bm.get("golden_cross")
+        try:
+            _tg_sent_data = get_combined_sentiment("SPY")
+            _tg_fear      = _tg_sent_data.get("combined")
+        except Exception:
+            pass
+        _tg_mpf_signals: list = []
+        with st.sidebar:
+            with st.spinner("📡 檢查警報條件…"):
+                _tg_sent = run_all_checks(
+                    portfolio     = _tg_portfolio,
+                    watchlist     = _tg_watchlist,
+                    prices        = _tg_prices,
+                    fear_index    = _tg_fear,
+                    golden_cross  = _tg_golden,
+                    mpf_signals   = _tg_mpf_signals,
+                    bot_token     = _tg_tok,
+                    chat_id       = _tg_cid,
+                    gemini_key    = _tg_gem,
+                    threshold_pct = float(_tg_threshold),
+                )
+        st.session_state["tg_last_sent"]    = _tg_sent
+        st.session_state["tg_auto_done_today"] = True
+        if _tg_sent:
+            st.sidebar.success(f"📱 已發送 {len(_tg_sent)} 則 Telegram 通知")
+        else:
+            st.sidebar.info("📱 暫無新警報（所有條件在冷卻期內）")
 
     # ── Watchlist sidebar ─────────────────────────────────────────────────────
     st.sidebar.markdown("---")
@@ -1334,6 +1446,42 @@ def main() -> None:
                 st.info("💡 尚無持倉數據，請先在「個股診斷」頁面添加股票到投資組合。")
         else:
             st.caption("💡 AI 分析需要有效的 GEMINI_API_KEY，請在 Secrets 中配置。")
+
+        # ── Telegram notification history ────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 📱 Telegram 通知紀錄")
+        if _telegram_configured():
+            _notif_log = load_notification_log()
+            if _notif_log:
+                _recent = list(reversed(_notif_log[-10:]))
+                _ntype_icons = {
+                    "take_profit":        "💰",
+                    "stop_loss":          "⚠️",
+                    "watchlist_rsi":      "📉",
+                    "watchlist_breakout": "📈",
+                    "mpf_rebalance":      "🛡️",
+                    "macro_fear":         "😱",
+                    "macro_crash":        "🚨",
+                }
+                for _n in _recent:
+                    _ts    = _n.get("time", "")[:16].replace("T", " ")
+                    _ntype = _n.get("type", "alert")
+                    _ntic  = _n.get("ticker", "")
+                    _npct  = _n.get("pct", "")
+                    _nicon = _ntype_icons.get(_ntype, "📢")
+                    _pct_part = (f" ({float(_npct):+.1f}%)" if _npct not in ("", None, "N/A") else "")
+                    _label = (
+                        f"{_nicon} **{_ts}** — {_ntype}"
+                        + (f" — {_ntic}" if _ntic else "")
+                        + _pct_part
+                    )
+                    with st.expander(_label, expanded=False):
+                        st.caption(_n.get("message", "（無訊息內容）"))
+            else:
+                st.info("📭 尚無 Telegram 通知紀錄。\n\n"
+                        "點擊側邊欄的「🔍 立即執行全面檢查」按鈕以觸發警報檢查。")
+        else:
+            st.info("💡 請先在側邊欄的 📱 Telegram 即時通知 中設定 Bot Token 及 User ID。")
 
     # ══════════════════════════════════════════════════════════════════════════
     # PAGE 4 — Backtest  (RSI strategy + multi-stock + Gemini + tech analysis)

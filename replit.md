@@ -42,6 +42,7 @@ streamlit run app.py --server.port 5000
 
 ## Recent Changes
 
+- **Telegram real-time notifications** (`notifier.py`): Full alert module with 4-hour deduplication cache, Gemini AI message generator, and 4 checkers: portfolio stop-loss/take-profit, watchlist RSI oversold + SMA50 breakout, macro fear/greed extremes, MPF rebalancing signals. Integrated into `app.py` sidebar ("📱 Telegram 即時通知" expander) with manual check button, test message, auto-trigger toggle, and notification log panel on 我的持倉 page. Requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_USER_ID` secrets.
 - **Tabs → Scrollable layout**: 美股回測 page replaced tabs 1-4 (策略設定/績效報告/技術指標對比/資金流入分析) with scrollable `st.container()` sections; kept only the 🔍 股票篩選 tab.
 - **Gemini AI for 個股診斷**: Section 7 added — "🤖 Gemini AI 個股深度分析" button with `_call_gemini_stock_ai()`.
 - **Gemini AI for 我的持倉**: "🤖 Gemini AI 持倉組合分析" section added after `render_portfolio_dashboard()`.
