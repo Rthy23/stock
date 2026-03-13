@@ -37,17 +37,25 @@ def init_session() -> None:
     """Initialise all required session_state keys (idempotent)."""
     try:
         defaults = {
-            "watchlist":      load_watchlist,
-            "portfolio":      load_portfolio,
-            "screening":      lambda: False,
-            "results":        lambda: None,
-            "diag_ticker":    lambda: "",
-            "diag_stock_info":lambda: None,
-            "diag_hist":      lambda: None,
-            "diag_period":    lambda: "1y",
-            "auto_fetch":     lambda: False,
-            "nav_page":       lambda: "📡 總體市場 (Macro)",
-            "benchmark":      lambda: "VOO",
+            "watchlist":         load_watchlist,
+            "portfolio":         load_portfolio,
+            "screening":         lambda: False,
+            "results":           lambda: None,
+            "diag_ticker":       lambda: "",
+            "diag_stock_info":   lambda: None,
+            "diag_hist":         lambda: None,
+            "diag_period":       lambda: "1y",
+            "auto_fetch":        lambda: False,
+            "nav_page":          lambda: "📡 總體市場 (Macro)",
+            "benchmark":         lambda: "VOO",
+            "mpf_portfolio":     lambda: [],
+            "mpf_api_key":       lambda: "",
+            "mpf_show_holdings": lambda: None,
+            "mpf_monthly_budget":lambda: 2400.0,
+            "bt_tickers":        lambda: "AAPL, MSFT, NVDA",
+            "bt_years":          lambda: 3,
+            "bt_benchmark":      lambda: "SPY",
+            "bt_result":         lambda: None,
         }
         for key, factory in defaults.items():
             if key not in st.session_state:

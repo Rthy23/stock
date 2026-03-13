@@ -3,6 +3,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 import pandas as pd
 import json
 import time
@@ -35,6 +36,8 @@ from ui_components import (
     plot_analyst_targets, plot_analyst_recs, plot_radar,
     zone_progress_bar,
 )
+from backtest_engine import run_backtest
+from mpf_assistant import render_mpf_page
 
 _MODULE = "main"
 
@@ -53,7 +56,13 @@ def main() -> None:
     st.sidebar.title("📈 美股選股")
     st.sidebar.markdown("---")
 
-    _PAGES = ["📡 總體市場 (Macro)", "🔬 個股診斷 (Micro)", "💼 我的持倉"]
+    _PAGES = [
+        "📡 總體市場 (Macro)",
+        "🔬 個股診斷 (Micro)",
+        "💼 我的持倉",
+        "📊 美股回測",
+        "🛡️ MPF 智投",
+    ]
     _nav   = st.session_state.get("nav_page", _PAGES[0])
     _idx   = _PAGES.index(_nav) if _nav in _PAGES else 0
 
@@ -1088,6 +1097,187 @@ def main() -> None:
     elif page == "💼 我的持倉":
         with st.spinner("正在更新持倉市值…"):
             render_portfolio_dashboard()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PAGE 4 — Backtest
+    # ══════════════════════════════════════════════════════════════════════════
+    elif page == "📊 美股回測":
+        st.markdown("## 📊 美股策略回測")
+        st.caption("等權重組合 vs 基準指數，自動計算 CAGR · 夏普比率 · 最大回撤 · Alpha")
+        st.markdown("---")
+
+        with st.form("backtest_form"):
+            col_tickers, col_years, col_bm = st.columns([4, 1, 2])
+            with col_tickers:
+                raw_tickers = st.text_input(
+                    "股票代碼（逗號分隔）",
+                    value=st.session_state.get("bt_tickers", "AAPL, MSFT, NVDA"),
+                    placeholder="AAPL, MSFT, NVDA, TSLA",
+                    help="輸入美股代碼，以逗號分隔",
+                )
+            with col_years:
+                years = st.selectbox(
+                    "回測年期", [1, 2, 3, 5, 10],
+                    index=[1,2,3,5,10].index(
+                        st.session_state.get("bt_years", 3)
+                    ),
+                )
+            with col_bm:
+                benchmark = st.selectbox(
+                    "基準指數",
+                    ["SPY", "QQQ", "QUAL", "MTUM", "VT"],
+                    index=["SPY","QQQ","QUAL","MTUM","VT"].index(
+                        st.session_state.get("bt_benchmark", "SPY")
+                    ),
+                )
+            submitted = st.form_submit_button("🚀 執行回測", type="primary")
+
+        if submitted:
+            tickers = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
+            st.session_state["bt_tickers"]   = raw_tickers
+            st.session_state["bt_years"]     = years
+            st.session_state["bt_benchmark"] = benchmark
+            if not tickers:
+                st.error("請至少輸入一個股票代碼。")
+            else:
+                with st.spinner(f"正在回測 {years} 年期資料，請稍候…"):
+                    result = run_backtest(tickers, years, benchmark)
+                st.session_state["bt_result"] = result
+
+        result = st.session_state.get("bt_result")
+        if result and not result.get("error"):
+            pf_s   = result["portfolio_series"]
+            bm_s   = result["benchmark_series"]
+            pf_m   = result["portfolio_metrics"]
+            bm_m   = result["benchmark_metrics"]
+            alpha  = result["alpha"]
+            hv     = result["high_vol_flags"]
+            tickers_used = result["pf_tickers"]
+
+            # ── Performance chart ──────────────────────────────────────────
+            st.markdown("### 📈 績效走勢對比")
+            fig = go.Figure()
+            if pf_s is not None and not pf_s.empty:
+                fig.add_trace(go.Scatter(
+                    x=pf_s.index,
+                    y=pf_s.values,
+                    mode="lines",
+                    name=f"策略組合（{', '.join(tickers_used)}）",
+                    line=dict(color="#FF4B4B", width=2),
+                    hovertemplate="日期: %{x|%Y-%m-%d}<br>淨值: %{y:.1f}<extra></extra>",
+                ))
+            if bm_s is not None and not bm_s.empty:
+                fig.add_trace(go.Scatter(
+                    x=bm_s.index,
+                    y=bm_s.values,
+                    mode="lines",
+                    name=f"基準：{benchmark}",
+                    line=dict(color="#00D4FF", width=2, dash="dot"),
+                    hovertemplate="日期: %{x|%Y-%m-%d}<br>淨值: %{y:.1f}<extra></extra>",
+                ))
+            fig.update_layout(
+                height=380,
+                margin=dict(l=0, r=0, t=20, b=20),
+                paper_bgcolor="#0d1117",
+                plot_bgcolor="#0d1117",
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom", y=1.02,
+                    xanchor="right", x=1,
+                    font=dict(size=12, color="#ddd"),
+                ),
+                xaxis=dict(
+                    showgrid=True, gridcolor="#2a2a3a",
+                    tickfont=dict(size=12, color="#aaa"),
+                ),
+                yaxis=dict(
+                    showgrid=True, gridcolor="#2a2a3a",
+                    tickfont=dict(size=12, color="#aaa"),
+                    title=dict(text="淨值（初始=100）",
+                               font=dict(size=12, color="#aaa")),
+                ),
+                font=dict(size=12, color="#ddd"),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # ── Metrics table ──────────────────────────────────────────────
+            st.markdown("### 📋 績效指標報告")
+
+            def _fmt_pct(v):
+                return f"{v*100:+.2f}%" if v is not None else "N/A"
+            def _fmt_f(v, decimals=2):
+                return f"{v:.{decimals}f}" if v is not None else "N/A"
+
+            alpha_str = _fmt_pct(alpha)
+            alpha_color = (
+                "#00FF7F" if (alpha is not None and alpha > 0)
+                else "#FF4B4B"
+            )
+
+            mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+            for col, title, val, color in [
+                (mc1, "策略 CAGR",  _fmt_pct(pf_m.get("cagr")),  "#00FF7F"),
+                (mc2, "夏普比率",   _fmt_f(pf_m.get("sharpe")),  "#00D4FF"),
+                (mc3, "最大回撤",   _fmt_pct(pf_m.get("max_dd")), "#FF4B4B"),
+                (mc4, "年化波動",   _fmt_pct(pf_m.get("vol")),    "#FFD700"),
+                (mc5, "超額報酬 α", alpha_str,                    alpha_color),
+            ]:
+                col.markdown(
+                    f"<div style='background:#111827; border-left:3px solid {color}; "
+                    f"border-radius:6px; padding:12px; text-align:center;'>"
+                    f"<div style='font-size:13px; color:#aaa;'>{title}</div>"
+                    f"<div style='font-size:18px; font-weight:700; color:{color};'>{val}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+            # Benchmark metrics row
+            st.markdown("<br>", unsafe_allow_html=True)
+            bc1, bc2, bc3, bc4 = st.columns(4)
+            for col, title, val in [
+                (bc1, f"{benchmark} CAGR",  _fmt_pct(bm_m.get("cagr"))),
+                (bc2, f"{benchmark} 夏普",  _fmt_f(bm_m.get("sharpe"))),
+                (bc3, f"{benchmark} 最大回撤", _fmt_pct(bm_m.get("max_dd"))),
+                (bc4, f"{benchmark} 年化波動", _fmt_pct(bm_m.get("vol"))),
+            ]:
+                col.markdown(
+                    f"<div style='background:#0d1117; border:1px solid #333; "
+                    f"border-radius:6px; padding:10px; text-align:center;'>"
+                    f"<div style='font-size:13px; color:#888;'>{title}</div>"
+                    f"<div style='font-size:16px; font-weight:600; color:#aaa;'>{val}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+            # ── Per-ticker table ───────────────────────────────────────────
+            if result.get("per_ticker_metrics"):
+                st.markdown("---")
+                st.markdown("### 🔬 個別股票績效")
+                rows = []
+                for t, m in result["per_ticker_metrics"].items():
+                    vol_flag = hv.get(t, False)
+                    rows.append({
+                        "代碼":          t,
+                        "CAGR":          _fmt_pct(m.get("cagr")),
+                        "夏普比率":       _fmt_f(m.get("sharpe")),
+                        "最大回撤":       _fmt_pct(m.get("max_dd")),
+                        "年化波動":       _fmt_pct(m.get("vol")),
+                        "風險標記":       "🔴 高波動" if vol_flag else "✅ 正常",
+                    })
+                st.dataframe(
+                    pd.DataFrame(rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        elif result and result.get("error"):
+            st.error(f"⚠️ 回測失敗：{result['error']}")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PAGE 5 — MPF 智投
+    # ══════════════════════════════════════════════════════════════════════════
+    elif page == "🛡️ MPF 智投":
+        render_mpf_page()
 
 
 if __name__ == "__main__":
