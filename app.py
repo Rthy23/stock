@@ -41,6 +41,7 @@ from ui_components import (
 )
 import backtest_engine as be
 from mpf_assistant import render_mpf_page
+from kol_whitelist import render_kol_section
 from ocr_module import generate_quant_report
 
 _MODULE = "main"
@@ -432,105 +433,7 @@ def main() -> None:
 
         # ── KOL / Analyst Tracker ──────────────────────────────────────────
         st.markdown("---")
-        st.markdown("### 🧠 精選分析師與 KOL 追蹤")
-        st.caption(
-            "以下為長期深入研究美股、具備良好信譽的專業分析師與意見領袖，"
-            "根據其歷史準確率與研究深度篩選。每日零點自動更新關注焦點。"
-        )
-
-        _KOLS = [
-            {
-                "name":     "Howard Marks",
-                "org":      "Oaktree Capital",
-                "focus":    "信用周期、風險評估、市場備忘錄",
-                "platform": "oaktreecapital.com",
-                "stance":   "謹慎",
-                "stanceColor": "#FF8C00",
-                "picks":    ["HYG", "LQD", "防禦型資產"],
-                "note":     "最新備忘錄：強調風險溢價不足，建議提高現金比重",
-                "rep":      "⭐⭐⭐⭐⭐",
-            },
-            {
-                "name":     "Cathie Wood",
-                "org":      "ARK Invest",
-                "focus":    "顛覆性創新：AI、基因組學、加密貨幣",
-                "platform": "ARK ETFs / X @CathieDWood",
-                "stance":   "積極做多",
-                "stanceColor": "#00CC44",
-                "picks":    ["TSLA", "NVDA", "COIN", "ROKU"],
-                "note":     "看好 AI 長期複合增長，短期波動不影響 5 年目標",
-                "rep":      "⭐⭐⭐⭐",
-            },
-            {
-                "name":     "Adam Khoo",
-                "org":      "Adam Khoo Learning Technologies",
-                "focus":    "價值投資、技術分析結合、波段操作",
-                "platform": "YouTube / courses",
-                "stance":   "中性偏多",
-                "stanceColor": "#0066CC",
-                "picks":    ["SPY", "QQQ", "AAPL", "MSFT"],
-                "note":     "當前市場波動屬正常回調，建議逢低分批佈局優質大型股",
-                "rep":      "⭐⭐⭐⭐",
-            },
-            {
-                "name":     "Jeremy Siegel",
-                "org":      "Wharton School / WisdomTree",
-                "focus":    "長期股票市場、退休投資組合",
-                "platform": "CNBC / Bloomberg",
-                "stance":   "長期樂觀",
-                "stanceColor": "#00CC44",
-                "picks":    ["VT", "VIG", "高股息ETF"],
-                "note":     "股票長期跑贏通脹具壓倒性優勢，不建議擇時進出",
-                "rep":      "⭐⭐⭐⭐⭐",
-            },
-            {
-                "name":     "Michael Burry",
-                "org":      "Scion Asset Management",
-                "focus":    "逆向投資、系統性風險、做空策略",
-                "platform": "X (間歇性) / SEC 13F",
-                "stance":   "偏空",
-                "stanceColor": "#FF4B4B",
-                "picks":    ["避險工具", "短期債券", "VIX"],
-                "note":     "13F 顯示持倉集中防禦性資產，警示市場過度樂觀",
-                "rep":      "⭐⭐⭐⭐",
-            },
-            {
-                "name":     "Joseph Carlson",
-                "org":      "個人投資者 / YouTube",
-                "focus":    "成長股 + 股息再投資、個人持倉透明化",
-                "platform": "YouTube @josephcarlsonshow",
-                "stance":   "長期持有",
-                "stanceColor": "#0066CC",
-                "picks":    ["MSFT", "AAPL", "V", "MA", "AMZN"],
-                "note":     "強調複利長期增長，月更持倉，持倉高透明度",
-                "rep":      "⭐⭐⭐⭐",
-            },
-        ]
-
-        _kol_refresh = datetime.now().strftime("%Y-%m-%d 00:00")
-        st.caption(f"資料快照：{_kol_refresh} UTC  ·  點擊個股代碼前往個股診斷")
-
-        for kol in _KOLS:
-            with st.expander(f"{kol['name']}  ·  {kol['org']}  ·  {kol['rep']}", expanded=False):
-                kc1, kc2 = st.columns([2, 1])
-                with kc1:
-                    st.markdown(
-                        f"**研究方向：** {kol['focus']}  \n"
-                        f"**平台：** {kol['platform']}  \n"
-                        f"**市場立場：** "
-                        f"<span style='color:{kol['stanceColor']}; font-weight:700;'>{kol['stance']}</span>",
-                        unsafe_allow_html=True,
-                    )
-                    st.info(f"💡 {kol['note']}")
-                with kc2:
-                    st.markdown("**關注標的：**")
-                    for pk in kol["picks"]:
-                        if st.button(pk, key=f"kol_{kol['name']}_{pk}",
-                                     use_container_width=True):
-                            st.session_state["diag_ticker"] = pk
-                            st.session_state["nav_page"]    = "🔬 個股診斷 (Micro)"
-                            st.session_state["auto_fetch"]  = True
-                            st.rerun()
+        render_kol_section(api_key=_api_key)
 
     # ══════════════════════════════════════════════════════════════════════════
     # PAGE 2 — Stock Diagnosis

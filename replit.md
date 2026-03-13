@@ -16,7 +16,13 @@ A Streamlit-based US stock screening and trading dashboard with technical analys
 - `analysis.py` — Technical indicators, stock screening, buy zone/exit strategy calculations, charts
 - `data_fetcher.py` — yfinance data fetching, watchlist/portfolio persistence, market benchmarks
 - `ui_components.py` — Reusable Streamlit UI components and session state management
-- `.streamlit/config.toml` — Streamlit server config (host: 0.0.0.0, port: 5000, dark theme)
+- `backtest_engine.py` — RSI mean-reversion backtest engine with SMA200 filter, dynamic stop-loss, individual_series
+- `mpf_assistant.py` — MPF (積金) intelligent advisor: OCR, portfolio, rebalance, strategy signals, AI report
+- `mpf_db.py` — SQLite persistence for MPF holdings (mpf_holdings.db)
+- `mpf_strategy.py` — RS+SMA strategy engine, dual pie charts, ETF history comparison, defensive allocation
+- `ocr_module.py` — Gemini AI OCR for MPF statement parsing + quant report generation
+- `kol_whitelist.py` — KOL whitelist scoring engine: 8 curated analysts, 3-dimensional scoring (consistency × argument quality × recency), Gemini AI structured consensus report
+- `.streamlit/config.toml` — Streamlit server config (host: 0.0.0.0, port: 5000)
 - `requirements.txt` — Python dependencies
 
 ## Dependencies
