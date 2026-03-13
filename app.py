@@ -1,3 +1,19 @@
+import os
+import streamlit as st
+from datetime import datetime
+
+# 调试代码：检查当前目录下有什么
+st.write("--- 调试模式：查看文件系统 ---")
+files = os.listdir(".")
+file_data = []
+for f in files:
+    mtime = os.path.getmtime(f)
+    file_data.append({
+        "文件名": f,
+        "最后修改": datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
+    })
+
+st.table(file_data) # 这会显示所有文件及其最后修改时间
 # ═══════════════════════════════════════════════════════════════════════════════
 # main.py  —  Entry point, page routing, sidebar (美股選股儀表板)
 # ═══════════════════════════════════════════════════════════════════════════════
