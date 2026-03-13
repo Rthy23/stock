@@ -267,10 +267,9 @@ def call_gemini_consensus(top_picks: List[Dict], api_key: str) -> List[Dict]:
       - confidence: 1-5 星信心評分 (整數)
       - reason    : AI 整合多方論點後的說明
     回傳 enhanced list (加上 ai_summary / ai_confidence / ai_reason)
+    Uses 1-hour cache + exponential-backoff retry on 429/timeout.
     """
-    import google.generativeai as genai  # type: ignore
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    from gemini_helper import call_gemini_cached, is_quota_error, is_auth_error
 
     results = []
     for pick in top_picks:
@@ -291,17 +290,25 @@ def call_gemini_consensus(top_picks: List[Dict], api_key: str) -> List[Dict]:
   "reason": "2-3句說明AI整合各方論點後的投資邏輯（繁體中文）"
 }}"""
         try:
-            resp = model.generate_content(prompt)
-            raw  = resp.text.strip()
+            raw  = call_gemini_cached(prompt, api_key)
             raw  = raw.replace("```json", "").replace("```", "").strip()
             data = json.loads(raw)
             pick["ai_summary"]    = data.get("summary", "")
             pick["ai_confidence"] = int(data.get("confidence", 3))
             pick["ai_reason"]     = data.get("reason", "")
         except Exception as e:
-            pick["ai_summary"]    = "AI 分析暫時不可用"
-            pick["ai_confidence"] = pick.get("_star_n", 3)
-            pick["ai_reason"]     = f"（錯誤：{e}）"
+            if is_quota_error(e):
+                pick["ai_summary"]    = "⏳ AI 配額暫時達上限，請1小時後重試"
+                pick["ai_confidence"] = pick.get("_star_n", 3)
+                pick["ai_reason"]     = "系統將自動於下次刷新後重新生成分析。"
+            elif is_auth_error(e):
+                pick["ai_summary"]    = "🔑 API Key 錯誤，請更新 Replit Secrets"
+                pick["ai_confidence"] = pick.get("_star_n", 3)
+                pick["ai_reason"]     = "請確認 GEMINI_API_KEY 已正確設定。"
+            else:
+                pick["ai_summary"]    = "AI 分析暫時不可用"
+                pick["ai_confidence"] = pick.get("_star_n", 3)
+                pick["ai_reason"]     = f"（錯誤：{e}）"
         results.append(pick)
     return results
 

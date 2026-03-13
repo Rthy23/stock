@@ -37,6 +37,7 @@ def preprocess_image(image_bytes: bytes) -> bytes:
 def ocr_with_gemini(image_bytes: bytes, api_key: str) -> tuple[list[dict], str | None]:
     """
     Pre-process image then call Gemini Vision to extract fund allocations.
+    Uses tenacity retry (exponential backoff) on 429 / timeout.
 
     Returns
     -------
@@ -44,6 +45,8 @@ def ocr_with_gemini(image_bytes: bytes, api_key: str) -> tuple[list[dict], str |
       items     : list of {"fund_name": str, "percentage": float}
       error_msg : str if failed, None if successful
     """
+    from gemini_helper import is_retryable, is_quota_error, is_auth_error
+    from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
     try:
         import google.generativeai as genai
         from PIL import Image
@@ -52,7 +55,6 @@ def ocr_with_gemini(image_bytes: bytes, api_key: str) -> tuple[list[dict], str |
         img = Image.open(io.BytesIO(processed))
 
         genai.configure(api_key=api_key)
-
         _MODEL_NAME = "gemini-1.5-flash"
         try:
             available = [m.name for m in genai.list_models()
@@ -61,7 +63,6 @@ def ocr_with_gemini(image_bytes: bytes, api_key: str) -> tuple[list[dict], str |
                 _MODEL_NAME = available[0] if available else _MODEL_NAME
         except Exception:
             pass
-
         model = genai.GenerativeModel(_MODEL_NAME)
 
         prompt = (
@@ -72,7 +73,17 @@ def ocr_with_gemini(image_bytes: bytes, api_key: str) -> tuple[list[dict], str |
             "Round percentage to 1 decimal. "
             "If a value is missing, omit that entry entirely."
         )
-        resp = model.generate_content([prompt, img])
+
+        @retry(
+            retry=retry_if_exception(is_retryable),
+            wait=wait_exponential(multiplier=2, min=4, max=60),
+            stop=stop_after_attempt(3),
+            reraise=True,
+        )
+        def _call():
+            return model.generate_content([prompt, img])
+
+        resp = _call()
         raw  = resp.text.strip()
 
         cleaned = re.sub(r"```[a-z]*\n?", "", raw).replace("```", "").strip()
@@ -90,6 +101,10 @@ def ocr_with_gemini(image_bytes: bytes, api_key: str) -> tuple[list[dict], str |
         return [], f"OCR 解析 JSON 失敗：{e}。請使用手動修正表單。"
     except Exception as e:
         print(_err("ocr_with_gemini", e))
+        if is_auth_error(e):
+            return [], "OCR 失敗：API Key 錯誤（403），請更新 Replit Secrets。"
+        if is_quota_error(e):
+            return [], "OCR 失敗：API 配額已達上限（429），請稍後再試。"
         return [], str(e)
 
 
@@ -164,63 +179,49 @@ def render_manual_correction_form(
 # ── Gemini text generation (for backtest reports) ────────────────────────────
 def generate_quant_report(metrics: dict, api_key: str) -> str | None:
     """
-    Call Gemini-1.5-flash to generate a brief quantitative analysis paragraph
-    from the provided backtest metrics dict.
-
-    Returns the generated text, or None on failure.
+    Call Gemini to generate a brief quantitative analysis paragraph from backtest metrics.
+    Uses exponential-backoff retry on 429/timeout + 1-hour cache.
+    Returns the generated text, or an error sentinel string on failure.
     """
+    from gemini_helper import call_gemini_cached, is_quota_error, is_auth_error
+
+    pf       = metrics.get("portfolio_metrics", {})
+    bm_m     = metrics.get("benchmark_metrics", {})
+    alpha    = metrics.get("alpha")
+    tickers  = metrics.get("pf_tickers", [])
+    years    = metrics.get("window_years", "N/A")
+    strategy = metrics.get("strategy_mode", "買入持有")
+
+    def _p(v, mult=100, decimals=2):
+        return f"{v*mult:+.{decimals}f}%" if v is not None else "N/A"
+
+    sharpe_str = f"{pf.get('sharpe'):.2f}" if pf.get("sharpe") is not None else "N/A"
+    prompt = (
+        f"你是一位量化分析師，請用繁體中文，以200字以內，"
+        f"根據以下回測數據撰寫一段簡潔的量化分析報告。"
+        f"必須點出：(1)策略績效亮點 (2)主要風險點 (3)是否建議使用此策略。\n\n"
+        f"回測標的: {', '.join(tickers)}\n"
+        f"策略模式: {strategy}\n"
+        f"回測年期: {years} 年\n"
+        f"組合 CAGR: {_p(pf.get('cagr'))}\n"
+        f"組合 Sharpe: {sharpe_str}\n"
+        f"最大回撤: {_p(pf.get('max_dd'))}\n"
+        f"年化波動: {_p(pf.get('vol'))}\n"
+        f"基準 CAGR ({metrics.get('benchmark_ticker','SPY')}): {_p(bm_m.get('cagr'))}\n"
+        f"超額報酬 Alpha: {_p(alpha)}\n"
+        f"請輸出純文字，不要使用 Markdown 格式，不要加標題。"
+    )
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-
-        _MODEL_NAME = "gemini-1.5-flash"
-        try:
-            available = [m.name for m in genai.list_models()
-                         if "generateContent" in m.supported_generation_methods]
-            if not any(_MODEL_NAME in n for n in available):
-                _MODEL_NAME = available[0] if available else _MODEL_NAME
-        except Exception:
-            pass
-
-        model = genai.GenerativeModel(_MODEL_NAME)
-
-        pf   = metrics.get("portfolio_metrics", {})
-        bm   = metrics.get("benchmark_metrics", {})
-        alpha= metrics.get("alpha")
-        tickers = metrics.get("pf_tickers", [])
-        years   = metrics.get("window_years", "N/A")
-        strategy= metrics.get("strategy_mode", "買入持有")
-
-        def _p(v, mult=100, decimals=2):
-            return f"{v*mult:+.{decimals}f}%" if v is not None else "N/A"
-
-        sharpe_str = f"{pf.get('sharpe'):.2f}" if pf.get("sharpe") is not None else "N/A"
-        prompt = (
-            f"你是一位量化分析師，請用繁體中文，以200字以內，"
-            f"根據以下回測數據撰寫一段簡潔的量化分析報告。"
-            f"必須點出：(1)策略績效亮點 (2)主要風險點 (3)是否建議使用此策略。\n\n"
-            f"回測標的: {', '.join(tickers)}\n"
-            f"策略模式: {strategy}\n"
-            f"回測年期: {years} 年\n"
-            f"組合 CAGR: {_p(pf.get('cagr'))}\n"
-            f"組合 Sharpe: {sharpe_str}\n"
-            f"最大回撤: {_p(pf.get('max_dd'))}\n"
-            f"年化波動: {_p(pf.get('vol'))}\n"
-            f"基準 CAGR ({metrics.get('benchmark_ticker','SPY')}): {_p(bm.get('cagr'))}\n"
-            f"超額報酬 Alpha: {_p(alpha)}\n"
-            f"請輸出純文字，不要使用 Markdown 格式，不要加標題。"
-        )
-        resp = model.generate_content(prompt)
-        return resp.text.strip()
+        return call_gemini_cached(prompt, api_key, "gemini-2.0-flash")
     except Exception as e:
         err_str = str(e)
         print(_err("generate_quant_report", e))
-        if "403" in err_str or "leaked" in err_str.lower():
+        if is_auth_error(e) or "403" in err_str or "leaked" in err_str.lower():
             return (
                 "❌ Gemini API Key 錯誤（403）：您的 API Key 可能已洩露或無效。\n"
                 "請前往 Google AI Studio 重新申請一組新的 API Key，"
                 "並更新 Replit Secrets 中的 GEMINI_API_KEY。"
             )
-        if "quota" in err_str.lower() or "429" in err_str:
-            return "❌ API 請求頻率超限（429），請稍後再試。"
+        if is_quota_error(e) or "quota" in err_str.lower() or "429" in err_str:
+            return "__QUOTA__"
         return None

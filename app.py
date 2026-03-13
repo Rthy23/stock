@@ -62,98 +62,48 @@ _DARK_BLUE_CARD  = "background:#1B2A3D; border-radius:6px"
 _DARK_AMBER_CARD = "background:#2D1B00; border-radius:6px"
 
 
+from gemini_helper import (
+    call_gemini_cached,
+    build_stock_prompt,
+    build_portfolio_prompt,
+    is_quota_error, is_auth_error,
+    render_quota_error, render_auth_error, render_generic_error,
+    handle_gemini_error,
+)
+
+
 def _call_gemini_stock_ai(stock_info: dict, hist, ticker: str, api_key: str) -> str | None:
-    """Generate Gemini AI individual stock analysis."""
+    """
+    Generate Gemini AI individual stock analysis.
+    Uses 1-hour cache + exponential-backoff retry on 429/timeout.
+    """
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        price        = stock_info.get("price", "N/A")
-        pe           = stock_info.get("pe_ratio", "N/A")
-        net_margin   = round((stock_info.get("net_margin") or 0) * 100, 2)
-        rev_growth   = round((stock_info.get("revenue_growth") or 0) * 100, 2)
-        mkt_cap      = stock_info.get("market_cap", "N/A")
-        eps          = stock_info.get("eps", "N/A")
-        beta         = stock_info.get("beta", "N/A")
-        sector       = stock_info.get("sector", "N/A")
-        name         = stock_info.get("name", ticker)
-        hist_summary = ""
-        if hist is not None and not hist.empty:
-            ret_1y  = round((hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1) * 100, 1)
-            hi_52   = round(float(hist["High"].max()), 2)
-            lo_52   = round(float(hist["Low"].min()),  2)
-            hist_summary = (f"過去1年報酬率：{ret_1y}%，52週高點：${hi_52}，"
-                            f"52週低點：${lo_52}，近期收盤：${hist['Close'].iloc[-1]:.2f}")
-        prompt = (
-            f"你是一位華爾街資深量化分析師，請以繁體中文對以下美股進行深度分析：\n\n"
-            f"【公司】{name}（{ticker}），板塊：{sector}\n"
-            f"【基本面】股價：${price}，P/E：{pe}，市值：${mkt_cap}，"
-            f"EPS：${eps}，Beta：{beta}\n"
-            f"淨利率：{net_margin}%，營收增長：{rev_growth}%\n"
-            f"【歷史表現】{hist_summary}\n\n"
-            f"請提供：\n"
-            f"1. 綜合評分（1-10）及理由\n"
-            f"2. 核心投資亮點（2-3點）\n"
-            f"3. 主要風險因素（2-3點）\n"
-            f"4. 進場時機建議\n"
-            f"5. 目標價位區間及止損建議\n"
-            f"請以結構化格式輸出，每節使用 **粗體標題**，內容精簡但具體。"
-        )
-        model    = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(prompt)
-        return response.text
+        prompt = build_stock_prompt(stock_info, hist, ticker)
+        return call_gemini_cached(prompt, api_key)
     except Exception as e:
-        err = str(e)
-        if "403" in err or "leaked" in err.lower():
-            return f"❌ API Key 錯誤：{err}\n請在 Replit Secrets 中更新 GEMINI_API_KEY。"
-        return f"❌ AI分析失敗：{err}"
+        if is_auth_error(e):
+            return f"❌ API Key 錯誤：請在 Replit Secrets 中更新 GEMINI_API_KEY。"
+        if is_quota_error(e):
+            return "__QUOTA__"
+        return f"❌ AI分析失敗：{e}"
 
 
 def _call_gemini_portfolio_ai(portfolio: dict, prices: dict, api_key: str) -> str | None:
-    """Generate Gemini AI portfolio analysis."""
+    """
+    Generate Gemini AI portfolio analysis.
+    Uses 1-hour cache + exponential-backoff retry on 429/timeout.
+    """
+    if not portfolio:
+        return "❌ 投資組合為空，無法生成分析。"
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        if not portfolio:
-            return "❌ 投資組合為空，無法生成分析。"
-        rows = []
-        total_cost = total_val = 0
-        for t, data in portfolio.items():
-            buy = data.get("buy_price", 0)
-            qty = data.get("qty", 0)
-            cur = prices.get(t, buy)
-            pnl_pct = (cur - buy) / buy * 100 if buy else 0
-            cost    = buy * qty
-            val     = cur * qty
-            total_cost += cost
-            total_val  += val
-            rows.append(
-                f"  {t}: 買入${buy:.2f}×{qty}股，現價${cur:.2f}，"
-                f"盈虧{pnl_pct:+.1f}%，市值${val:,.0f}"
-            )
-        total_pnl = (total_val - total_cost) / total_cost * 100 if total_cost else 0
-        holdings_txt = "\n".join(rows)
-        prompt = (
-            f"你是一位華爾街資深投資組合經理，請以繁體中文對以下持倉進行深度分析：\n\n"
-            f"【投資組合總覽】\n"
-            f"總成本：${total_cost:,.0f}，現值：${total_val:,.0f}，"
-            f"整體盈虧：{total_pnl:+.1f}%\n\n"
-            f"【個股持倉明細】\n{holdings_txt}\n\n"
-            f"請提供：\n"
-            f"1. 整體組合評估（分散度、風險集中度）\n"
-            f"2. 表現最佳與最差持倉分析\n"
-            f"3. 組合再平衡建議（哪些應加碼、減碼或停損）\n"
-            f"4. 宏觀環境下的整體風險提示\n"
-            f"5. 下一步行動建議（具體可執行）\n"
-            f"請以結構化格式輸出，每節使用 **粗體標題**，內容精簡但具體。"
-        )
-        model    = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(prompt)
-        return response.text
+        prompt = build_portfolio_prompt(portfolio, prices)
+        return call_gemini_cached(prompt, api_key)
     except Exception as e:
-        err = str(e)
-        if "403" in err or "leaked" in err.lower():
-            return f"❌ API Key 錯誤：{err}\n請在 Replit Secrets 中更新 GEMINI_API_KEY。"
-        return f"❌ AI分析失敗：{err}"
+        if is_auth_error(e):
+            return f"❌ API Key 錯誤：請在 Replit Secrets 中更新 GEMINI_API_KEY。"
+        if is_quota_error(e):
+            return "__QUOTA__"
+        return f"❌ AI分析失敗：{e}"
 
 
 def _get_gemini_key() -> str:
@@ -1392,8 +1342,10 @@ def main() -> None:
                     st.session_state[f"diag_ai_report_{ticker}"] = _ai_text
                 if st.session_state.get(f"diag_ai_report_{ticker}"):
                     _report = st.session_state[f"diag_ai_report_{ticker}"]
-                    if _report.startswith("❌"):
-                        st.error(_report)
+                    if _report == "__QUOTA__":
+                        render_quota_error()
+                    elif _report.startswith("❌"):
+                        render_auth_error() if "Key" in _report else st.error(_report)
                     else:
                         st.markdown(
                             f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
@@ -1433,8 +1385,10 @@ def main() -> None:
                     st.session_state["pf_ai_report"] = _pf_ai_text
                 if st.session_state.get("pf_ai_report"):
                     _pf_report = st.session_state["pf_ai_report"]
-                    if _pf_report.startswith("❌"):
-                        st.error(_pf_report)
+                    if _pf_report == "__QUOTA__":
+                        render_quota_error()
+                    elif _pf_report.startswith("❌"):
+                        render_auth_error() if "Key" in _pf_report else st.error(_pf_report)
                     else:
                         st.markdown(
                             f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
@@ -1985,8 +1939,10 @@ def main() -> None:
                             st.warning("AI 報告生成失敗，請確認 GEMINI_API_KEY 已正確設定於 Secrets。")
                     _bt_report = st.session_state.get("bt_gemini_report")
                     if _bt_report:
-                        if _bt_report.startswith("❌"):
-                            st.error(_bt_report)
+                        if _bt_report == "__QUOTA__":
+                            render_quota_error()
+                        elif _bt_report.startswith("❌"):
+                            render_auth_error() if "Key" in _bt_report else st.error(_bt_report)
                         else:
                             st.markdown(
                                 f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "

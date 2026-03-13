@@ -168,20 +168,20 @@ _ALERT_PROMPTS = {
 
 def _build_ai_message(alert_type: str, data: dict, gemini_key: str,
                       fallback: str = "") -> str:
-    """Generate a Gemini AI contextualized notification message."""
+    """
+    Generate a Gemini AI contextualized notification message.
+    Uses exponential-backoff retry on 429/timeout; falls back to template on failure.
+    """
     if not gemini_key:
         return fallback or _default_message(alert_type, data)
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=gemini_key)
+        from gemini_helper import call_gemini_raw
         prompt_tmpl = _ALERT_PROMPTS.get(alert_type, "")
         if not prompt_tmpl:
             return fallback or _default_message(alert_type, data)
         data_str = "\n".join(f"  {k}: {v}" for k, v in data.items())
         prompt   = prompt_tmpl.format(data=data_str)
-        model    = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(prompt)
-        return response.text.strip()
+        return call_gemini_raw(prompt, gemini_key).strip()
     except Exception as e:
         print(_err("_build_ai_message", e))
         return fallback or _default_message(alert_type, data)
