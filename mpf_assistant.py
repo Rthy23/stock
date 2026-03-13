@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 from backtest_engine import calc_rebalance
+from ocr_module import ocr_with_gemini, render_manual_correction_form
 
 _MODULE     = "mpf_assistant"
 _MAPPING_PATH = "fund_mapping.json"
@@ -112,51 +113,22 @@ def lookup_etf(fund_name: str) -> dict | None:
     return None
 
 
-# ── Gemini OCR ────────────────────────────────────────────────────────────────
-def ocr_mpf_screenshot(image_bytes: bytes, api_key: str) -> str | None:
-    """Call Gemini Vision to extract fund name + % from an eMPF screenshot."""
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-
-        import PIL.Image, io
-        img  = PIL.Image.open(io.BytesIO(image_bytes))
-        prompt = (
-            "You are an MPF portfolio analyzer. "
-            "Extract ALL fund names and their allocation percentages from this eMPF screenshot. "
-            "Return ONLY a valid JSON array, no markdown, no explanation. "
-            "Format: [{\"fund_name\": \"...\", \"percentage\": 25.5}, ...]. "
-            "Round percentage to 1 decimal place."
-        )
-        response = model.generate_content([prompt, img])
-        return response.text.strip()
-    except Exception as e:
-        print(_err("ocr_mpf_screenshot", e))
-        return None
-
-
-def parse_ocr_result(raw_text: str) -> list[dict]:
-    """Parse Gemini JSON response into list of {fund_name, pct, etf}."""
-    try:
-        cleaned = re.sub(r"```[a-z]*", "", raw_text).replace("```", "").strip()
-        items   = json.loads(cleaned)
-        result  = []
-        for item in items:
-            name = str(item.get("fund_name", "")).strip()
-            pct  = float(item.get("percentage", 0))
-            etf_info = lookup_etf(name)
-            result.append({
-                "fund_name": name,
-                "pct":       pct,
-                "etf":       etf_info["etf"]       if etf_info else "N/A",
-                "category":  etf_info["category"]  if etf_info else "未知",
-                "desc":      etf_info["desc"]       if etf_info else "—",
-            })
-        return result
-    except Exception as e:
-        print(_err("parse_ocr_result", e))
-        return []
+# ── Gemini OCR (delegates to ocr_module) ─────────────────────────────────────
+def _enrich_ocr_items(raw_items: list[dict]) -> list[dict]:
+    """Add ETF mapping to raw OCR items."""
+    result = []
+    for item in raw_items:
+        name     = str(item.get("fund_name", "")).strip()
+        pct      = float(item.get("percentage", 0))
+        etf_info = lookup_etf(name)
+        result.append({
+            "fund_name": name,
+            "pct":       pct,
+            "etf":       etf_info["etf"]       if etf_info else "N/A",
+            "category":  etf_info["category"]  if etf_info else "未知",
+            "desc":      etf_info["desc"]       if etf_info else "—",
+        })
+    return result
 
 
 # ── Holdings lookup ───────────────────────────────────────────────────────────
@@ -266,10 +238,10 @@ def render_market_alert() -> None:
 
 
 def render_upload_section() -> None:
-    """OCR upload section: supports multiple screenshots."""
+    """OCR upload section: grayscale preprocessing + auto correction form fallback."""
     try:
         st.markdown("### 📸 上傳 eMPF 截圖（OCR 自動識別）")
-        st.caption("支援多張圖片同時上傳。系統將自動合併識別結果。")
+        st.caption("支援多張圖片同時上傳。自動進行灰階預處理以提升識別率。OCR 失敗時自動彈出手動修正表單。")
 
         api_key = (
             st.secrets.get("GEMINI_API_KEY", "")
@@ -277,6 +249,8 @@ def render_upload_section() -> None:
         )
         if not api_key:
             api_key = os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            api_key = st.session_state.get("mpf_api_key", "")
 
         if not api_key:
             with st.expander("🔑 設定 Gemini API Key（OCR 功能必需）", expanded=True):
@@ -295,42 +269,41 @@ def render_upload_section() -> None:
             "選擇截圖檔案",
             type=["png", "jpg", "jpeg", "webp"],
             accept_multiple_files=True,
+            key="mpf_uploader",
         )
 
-        if uploaded and st.button("🔍 開始 OCR 識別", type="primary"):
-            key = st.session_state.get("mpf_api_key", "")
-            if not key:
+        if uploaded and st.button("🔍 開始 OCR 識別", type="primary", key="mpf_ocr_btn"):
+            key_val = st.session_state.get("mpf_api_key", "")
+            if not key_val:
                 st.error("請先輸入 Gemini API Key 才能使用 OCR 識別功能。")
                 return
 
-            merged: list[dict] = []
+            all_raw_items: list[dict] = []
+            has_failure = False
+
             for up in uploaded:
-                with st.spinner(f"正在識別 {up.name}…"):
-                    raw = ocr_mpf_screenshot(up.read(), key)
-                if raw:
-                    items = parse_ocr_result(raw)
-                    merged.extend(items)
-                    st.success(f"✅ {up.name}：識別到 {len(items)} 個基金")
+                with st.spinner(f"正在預處理並識別 {up.name}…"):
+                    raw_items, err = ocr_with_gemini(up.read(), key_val)
+                if err:
+                    st.warning(f"⚠️ {up.name} 識別失敗：{err}")
+                    has_failure = True
+                    all_raw_items.extend([])
                 else:
-                    st.warning(f"⚠️ {up.name}：OCR 識別失敗，請使用手動輸入。")
+                    all_raw_items.extend(raw_items)
+                    st.success(f"✅ {up.name}：識別到 {len(raw_items)} 個基金")
 
-            if merged:
-                fund_map: dict[str, float] = {}
-                for item in merged:
-                    k = item["fund_name"]
-                    fund_map[k] = fund_map.get(k, 0) + item["pct"]
+            if has_failure or not all_raw_items:
+                st.session_state["mpf_ocr_pending_correction"] = all_raw_items
+            elif all_raw_items:
+                _commit_ocr_items(all_raw_items)
 
-                final = []
-                for name, pct in fund_map.items():
-                    ei = lookup_etf(name)
-                    final.append({
-                        "fund_name": name,
-                        "pct":       round(pct, 1),
-                        "etf":       ei["etf"]      if ei else "N/A",
-                        "category":  ei["category"] if ei else "未知",
-                        "desc":      ei["desc"]      if ei else "—",
-                    })
-                st.session_state["mpf_portfolio"] = final
+        # ── Auto-popup correction form when OCR had issues ──────────────────
+        if "mpf_ocr_pending_correction" in st.session_state:
+            pending = st.session_state["mpf_ocr_pending_correction"]
+            corrected = render_manual_correction_form(pending, form_key="mpf_ocr_fix")
+            if corrected is not None:
+                _commit_ocr_items(corrected)
+                del st.session_state["mpf_ocr_pending_correction"]
                 st.rerun()
 
         st.markdown("---")
@@ -338,6 +311,19 @@ def render_upload_section() -> None:
 
     except Exception as e:
         st.error(f"⚠️ 上傳識別異常：{e}")
+
+
+def _commit_ocr_items(raw_items: list[dict]) -> None:
+    """Enrich OCR items and save to session state portfolio."""
+    enriched = _enrich_ocr_items(raw_items)
+    fund_map: dict[str, dict] = {}
+    for item in enriched:
+        k = item["fund_name"]
+        if k in fund_map:
+            fund_map[k]["pct"] = round(fund_map[k]["pct"] + item["pct"], 1)
+        else:
+            fund_map[k] = dict(item)
+    st.session_state["mpf_portfolio"] = list(fund_map.values())
 
 
 def render_manual_input() -> None:

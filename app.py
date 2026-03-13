@@ -36,8 +36,13 @@ from ui_components import (
     plot_analyst_targets, plot_analyst_recs, plot_radar,
     zone_progress_bar,
 )
-from backtest_engine import run_backtest
+from backtest_engine import (
+    run_backtest, RSI_PRESETS,
+    fetch_ohlcv, calc_rsi, calc_macd, calc_bollinger,
+    calc_obv, calc_mfi,
+)
 from mpf_assistant import render_mpf_page
+from ocr_module import generate_quant_report
 
 _MODULE = "main"
 
@@ -46,11 +51,66 @@ def _err(func: str, e: Exception) -> str:
             f"| ERROR: {type(e).__name__}: {e}")
 
 
+def _inject_global_css() -> None:
+    """Inject theme (dark/light) + font-size CSS based on session state."""
+    dark_mode  = st.session_state.get("dark_mode", True)
+    font_size  = st.session_state.get("font_size", 13)
+
+    if dark_mode:
+        bg_main  = "#0E1117"
+        bg_side  = "#1A1D2E"
+        txt_col  = "#FAFAFA"
+        inp_bg   = "#1A1D2E"
+        inp_bdr  = "#3A3D5C"
+    else:
+        bg_main  = "#FFFFFF"
+        bg_side  = "#F4F6F8"
+        txt_col  = "#111111"
+        inp_bg   = "#FFFFFF"
+        inp_bdr  = "#CCCCCC"
+
+    st.markdown(
+        f"""<style>
+        /* Global base */
+        .stApp {{
+            background-color: {bg_main} !important;
+            color: {txt_col} !important;
+            font-size: {font_size}px !important;
+        }}
+        section[data-testid="stSidebar"] {{
+            background-color: {bg_side} !important;
+        }}
+        /* Text elements */
+        p, span, label, div, h1, h2, h3, h4, h5, h6,
+        .stMarkdown, .stCaption {{
+            font-size: {font_size}px !important;
+            color: {txt_col} !important;
+        }}
+        /* Inputs */
+        .stTextInput input, .stNumberInput input,
+        .stSelectbox select, .stTextArea textarea {{
+            background-color: {inp_bg} !important;
+            color: {txt_col} !important;
+            border-color: {inp_bdr} !important;
+            font-size: {font_size}px !important;
+        }}
+        /* Dataframe */
+        .stDataFrame {{ font-size: {font_size}px !important; }}
+        /* Sidebar text */
+        section[data-testid="stSidebar"] * {{
+            color: {txt_col} !important;
+        }}
+        </style>""",
+        unsafe_allow_html=True,
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 def main() -> None:
     init_session()
+    _inject_global_css()
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
     st.sidebar.title("📈 美股選股")
@@ -91,6 +151,21 @@ def main() -> None:
             mime="application/json",
             use_container_width=True,
             key="sb_export",
+        )
+
+    # ── Display controls ──────────────────────────────────────────────────────
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("🎨 顯示設定", expanded=False):
+        st.toggle(
+            "🌙 夜間模式 (Dark Mode)",
+            value=st.session_state.get("dark_mode", True),
+            key="dark_mode",
+        )
+        st.slider(
+            "字體大小 (px)",
+            min_value=12, max_value=18,
+            value=st.session_state.get("font_size", 13),
+            step=1, key="font_size",
         )
 
     # ── Screener parameters ───────────────────────────────────────────────────
@@ -374,7 +449,27 @@ def main() -> None:
                 st.markdown("<hr style='margin:2px 0; border-color:#1E2130;'>",
                             unsafe_allow_html=True)
 
+            # ── Screener → Backtest integration button ─────────────────────
             df = pd.DataFrame(results)
+            screener_tickers = [s["ticker"] for s in results]
+            bt_col1, bt_col2 = st.columns([3, 1])
+            with bt_col1:
+                st.markdown(
+                    f"<div style='background:#0D1A2E; border:1px solid #00D4FF44; "
+                    f"border-radius:6px; padding:8px 14px; font-size:13px; color:#00D4FF;'>"
+                    f"📊 篩選出 <b>{len(screener_tickers)}</b> 支股票，可直接送往回測引擎進行批量比較</div>",
+                    unsafe_allow_html=True,
+                )
+            with bt_col2:
+                if st.button("🚀 批量回測", type="primary",
+                             key="screen_to_bt", use_container_width=True):
+                    top5 = screener_tickers[:5]
+                    st.session_state["bt_tickers"]       = ", ".join(top5)
+                    st.session_state["bt_from_screener"] = True
+                    st.session_state["nav_page"]         = "📊 美股回測"
+                    st.rerun()
+            st.markdown("<br>", unsafe_allow_html=True)
+
             st.markdown("### 📊 篩選結果圖表")
             try:
                 c1, c2 = st.columns(2)
@@ -1099,179 +1194,571 @@ def main() -> None:
             render_portfolio_dashboard()
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 4 — Backtest
+    # PAGE 4 — Backtest  (RSI strategy + multi-stock + Gemini + tech analysis)
     # ══════════════════════════════════════════════════════════════════════════
     elif page == "📊 美股回測":
-        st.markdown("## 📊 美股策略回測")
-        st.caption("等權重組合 vs 基準指數，自動計算 CAGR · 夏普比率 · 最大回撤 · Alpha")
-        st.markdown("---")
+        st.markdown("## 📊 進階量化策略回測平台")
+        st.caption("多股批量回測 · RSI均值回歸策略 · SMA200濾網 · 動態止損 · Gemini AI分析報告")
 
-        with st.form("backtest_form"):
-            col_tickers, col_years, col_bm = st.columns([4, 1, 2])
-            with col_tickers:
-                raw_tickers = st.text_input(
-                    "股票代碼（逗號分隔）",
-                    value=st.session_state.get("bt_tickers", "AAPL, MSFT, NVDA"),
-                    placeholder="AAPL, MSFT, NVDA, TSLA",
-                    help="輸入美股代碼，以逗號分隔",
-                )
-            with col_years:
-                years = st.selectbox(
-                    "回測年期", [1, 2, 3, 5, 10],
-                    index=[1,2,3,5,10].index(
-                        st.session_state.get("bt_years", 3)
-                    ),
-                )
-            with col_bm:
-                benchmark = st.selectbox(
-                    "基準指數",
-                    ["SPY", "QQQ", "QUAL", "MTUM", "VT"],
-                    index=["SPY","QQQ","QUAL","MTUM","VT"].index(
-                        st.session_state.get("bt_benchmark", "SPY")
-                    ),
-                )
-            submitted = st.form_submit_button("🚀 執行回測", type="primary")
-
-        if submitted:
-            tickers = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
-            st.session_state["bt_tickers"]   = raw_tickers
-            st.session_state["bt_years"]     = years
-            st.session_state["bt_benchmark"] = benchmark
-            if not tickers:
-                st.error("請至少輸入一個股票代碼。")
-            else:
-                with st.spinner(f"正在回測 {years} 年期資料，請稍候…"):
-                    result = run_backtest(tickers, years, benchmark)
-                st.session_state["bt_result"] = result
-
-        result = st.session_state.get("bt_result")
-        if result and not result.get("error"):
-            pf_s   = result["portfolio_series"]
-            bm_s   = result["benchmark_series"]
-            pf_m   = result["portfolio_metrics"]
-            bm_m   = result["benchmark_metrics"]
-            alpha  = result["alpha"]
-            hv     = result["high_vol_flags"]
-            tickers_used = result["pf_tickers"]
-
-            # ── Performance chart ──────────────────────────────────────────
-            st.markdown("### 📈 績效走勢對比")
-            fig = go.Figure()
-            if pf_s is not None and not pf_s.empty:
-                fig.add_trace(go.Scatter(
-                    x=pf_s.index,
-                    y=pf_s.values,
-                    mode="lines",
-                    name=f"策略組合（{', '.join(tickers_used)}）",
-                    line=dict(color="#FF4B4B", width=2),
-                    hovertemplate="日期: %{x|%Y-%m-%d}<br>淨值: %{y:.1f}<extra></extra>",
-                ))
-            if bm_s is not None and not bm_s.empty:
-                fig.add_trace(go.Scatter(
-                    x=bm_s.index,
-                    y=bm_s.values,
-                    mode="lines",
-                    name=f"基準：{benchmark}",
-                    line=dict(color="#00D4FF", width=2, dash="dot"),
-                    hovertemplate="日期: %{x|%Y-%m-%d}<br>淨值: %{y:.1f}<extra></extra>",
-                ))
-            fig.update_layout(
-                height=380,
-                margin=dict(l=0, r=0, t=20, b=20),
-                paper_bgcolor="#0d1117",
-                plot_bgcolor="#0d1117",
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom", y=1.02,
-                    xanchor="right", x=1,
-                    font=dict(size=12, color="#ddd"),
-                ),
-                xaxis=dict(
-                    showgrid=True, gridcolor="#2a2a3a",
-                    tickfont=dict(size=12, color="#aaa"),
-                ),
-                yaxis=dict(
-                    showgrid=True, gridcolor="#2a2a3a",
-                    tickfont=dict(size=12, color="#aaa"),
-                    title=dict(text="淨值（初始=100）",
-                               font=dict(size=12, color="#aaa")),
-                ),
-                font=dict(size=12, color="#ddd"),
+        # ── From screener banner ───────────────────────────────────────────
+        if st.session_state.get("bt_from_screener"):
+            screened_str = st.session_state.get("bt_tickers", "")
+            st.markdown(
+                f"<div style='background:#0D2E0D; border:1px solid #00FF7F55; "
+                f"border-radius:6px; padding:8px 14px; margin-bottom:10px; font-size:13px;'>"
+                f"✅ 已從篩選器導入股票：<b style='color:#00FF7F;'>{screened_str}</b>　"
+                f"可在下方修改後執行回測。</div>",
+                unsafe_allow_html=True,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.session_state["bt_from_screener"] = False
 
-            # ── Metrics table ──────────────────────────────────────────────
-            st.markdown("### 📋 績效指標報告")
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["⚙️ 策略設定", "📈 績效報告", "📉 技術指標對比", "💹 資金流入分析"]
+        )
 
+        # ──────────────────────────────────────────────────────────────────
+        # Tab 1 — Strategy Setup
+        # ──────────────────────────────────────────────────────────────────
+        with tab1:
+            st.markdown("### 📌 資產類別與 RSI 參數")
+
+            asset_class = st.radio(
+                "資產類別（自動調整 RSI 閾值）",
+                list(RSI_PRESETS.keys()),
+                horizontal=True,
+                key="bt_asset_class",
+            )
+            preset = RSI_PRESETS[asset_class]
+
+            preset_info_cols = st.columns(4)
+            for col_w, k, label in [
+                (preset_info_cols[0], "buy",        "RSI 買入閾值"),
+                (preset_info_cols[1], "sell",       "RSI 賣出閾值"),
+                (preset_info_cols[2], "sma_period", "SMA 濾網週期"),
+                (preset_info_cols[3], "stop_loss",  "動態止損"),
+            ]:
+                val = f"{preset[k]*100:.0f}%" if k == "stop_loss" else str(preset[k])
+                col_w.markdown(
+                    f"<div style='background:#111827; border-left:3px solid #00D4FF; "
+                    f"border-radius:6px; padding:10px; text-align:center;'>"
+                    f"<div style='font-size:12px; color:#888;'>{label}</div>"
+                    f"<div style='font-size:18px; font-weight:700; color:#00D4FF;'>{val}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("### 🎯 回測參數")
+
+            with st.form("backtest_form_v2"):
+                row1a, row1b, row1c = st.columns([4, 1, 2])
+                with row1a:
+                    raw_tickers = st.text_input(
+                        "股票代碼（最多 5 支，逗號分隔）",
+                        value=st.session_state.get("bt_tickers", "AAPL, MSFT, NVDA"),
+                        placeholder="AAPL, MSFT, NVDA, TSLA, GOOG",
+                        help="最多 5 支，超出部分自動截取前 5 支",
+                    )
+                with row1b:
+                    years = st.selectbox(
+                        "回測年期", [1, 2, 3, 5, 10],
+                        index=[1,2,3,5,10].index(
+                            st.session_state.get("bt_years", 3)
+                        ),
+                    )
+                with row1c:
+                    benchmark = st.selectbox(
+                        "基準指數",
+                        ["SPY", "QQQ", "QUAL", "MTUM", "VT"],
+                        index=["SPY","QQQ","QUAL","MTUM","VT"].index(
+                            st.session_state.get("bt_benchmark", "SPY")
+                        ),
+                    )
+
+                row2a, row2b = st.columns([2, 3])
+                with row2a:
+                    strategy_mode = st.radio(
+                        "策略模式",
+                        ["買入持有", "RSI均值回歸"],
+                        index=0 if st.session_state.get("bt_strategy", "買入持有") == "買入持有" else 1,
+                        horizontal=True,
+                    )
+                with row2b:
+                    if asset_class == "自定義":
+                        rsi_buy_custom  = st.slider("RSI 買入閾值", 10, 45, preset["buy"],   key="rsi_buy_c")
+                        rsi_sell_custom = st.slider("RSI 賣出閾值", 55, 90, preset["sell"],  key="rsi_sell_c")
+                        stop_loss_custom= st.slider("止損比例 %",    5,  25, int(preset["stop_loss"]*100), key="sl_c")
+                        rsi_buy_v   = rsi_buy_custom
+                        rsi_sell_v  = rsi_sell_custom
+                        stop_loss_v = stop_loss_custom / 100
+                    else:
+                        rsi_buy_v   = preset["buy"]
+                        rsi_sell_v  = preset["sell"]
+                        stop_loss_v = preset["stop_loss"]
+                        if strategy_mode == "RSI均值回歸":
+                            st.info(
+                                f"使用 {asset_class} 預設：RSI {rsi_buy_v}/{rsi_sell_v}　"
+                                f"SMA{preset['sma_period']} 濾網　止損 {stop_loss_v*100:.0f}%"
+                            )
+
+                gemini_key_bt = st.text_input(
+                    "Gemini API Key（AI 分析報告，選填）",
+                    type="password",
+                    value=st.session_state.get("bt_gemini_key", ""),
+                    placeholder="AIza... （前往 aistudio.google.com 免費申請）",
+                    key="gemini_key_input",
+                )
+                submitted_bt = st.form_submit_button("🚀 執行回測", type="primary",
+                                                     use_container_width=True)
+
+            if submitted_bt:
+                tickers_raw = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
+                tickers = tickers_raw[:5]
+                st.session_state["bt_tickers"]    = raw_tickers
+                st.session_state["bt_years"]      = years
+                st.session_state["bt_benchmark"]  = benchmark
+                st.session_state["bt_strategy"]   = strategy_mode
+                st.session_state["bt_gemini_key"] = gemini_key_bt or st.session_state.get("bt_gemini_key","")
+                if not tickers:
+                    st.error("請至少輸入一個股票代碼。")
+                elif len(tickers_raw) > 5:
+                    st.warning(f"⚠️ 最多支援 5 支股票，已自動使用前 5 支：{', '.join(tickers)}")
+                if tickers:
+                    with st.spinner(f"正在執行 {strategy_mode} 回測（{years}年期），請稍候…"):
+                        result = run_backtest(
+                            tickers, years, benchmark,
+                            strategy_mode=strategy_mode,
+                            rsi_buy=rsi_buy_v, rsi_sell=rsi_sell_v,
+                            sma_period=preset.get("sma_period", 200),
+                            stop_loss_pct=stop_loss_v,
+                        )
+                    st.session_state["bt_result"] = result
+                    if not result.get("error"):
+                        st.success("✅ 回測完成！請切換至「績效報告」頁籤查看結果。")
+                    else:
+                        st.error(f"⚠️ 回測失敗：{result['error']}")
+
+        # ──────────────────────────────────────────────────────────────────
+        # Tab 2 — Performance Report
+        # ──────────────────────────────────────────────────────────────────
+        with tab2:
             def _fmt_pct(v):
                 return f"{v*100:+.2f}%" if v is not None else "N/A"
             def _fmt_f(v, decimals=2):
                 return f"{v:.{decimals}f}" if v is not None else "N/A"
 
-            alpha_str = _fmt_pct(alpha)
-            alpha_color = (
-                "#00FF7F" if (alpha is not None and alpha > 0)
-                else "#FF4B4B"
-            )
+            result = st.session_state.get("bt_result")
+            if not result:
+                st.info("💡 請先在「策略設定」頁籤設定參數並執行回測。")
+            elif result.get("error"):
+                st.error(f"⚠️ 回測失敗：{result['error']}")
+            else:
+                pf_s         = result["portfolio_series"]
+                bm_s         = result["benchmark_series"]
+                pf_m         = result["portfolio_metrics"]
+                bm_m         = result["benchmark_metrics"]
+                alpha        = result["alpha"]
+                hv           = result["high_vol_flags"]
+                tickers_used = result["pf_tickers"]
+                bm_ticker    = result["benchmark_ticker"]
+                strategy_lbl = result.get("strategy_mode", "買入持有")
+                contrib      = result.get("contribution", {})
+                dd_periods   = result.get("drawdown_periods", [])
 
-            mc1, mc2, mc3, mc4, mc5 = st.columns(5)
-            for col, title, val, color in [
-                (mc1, "策略 CAGR",  _fmt_pct(pf_m.get("cagr")),  "#00FF7F"),
-                (mc2, "夏普比率",   _fmt_f(pf_m.get("sharpe")),  "#00D4FF"),
-                (mc3, "最大回撤",   _fmt_pct(pf_m.get("max_dd")), "#FF4B4B"),
-                (mc4, "年化波動",   _fmt_pct(pf_m.get("vol")),    "#FFD700"),
-                (mc5, "超額報酬 α", alpha_str,                    alpha_color),
-            ]:
-                col.markdown(
-                    f"<div style='background:#111827; border-left:3px solid {color}; "
-                    f"border-radius:6px; padding:12px; text-align:center;'>"
-                    f"<div style='font-size:13px; color:#aaa;'>{title}</div>"
-                    f"<div style='font-size:18px; font-weight:700; color:{color};'>{val}</div>"
-                    f"</div>",
+                st.markdown(
+                    f"<div style='background:#0D1A2E; border-radius:8px; padding:8px 14px; "
+                    f"margin-bottom:10px; font-size:13px; color:#00D4FF;'>"
+                    f"📊 策略：<b>{strategy_lbl}</b>　"
+                    f"標的：<b>{', '.join(tickers_used)}</b>　"
+                    f"基準：<b>{bm_ticker}</b>　"
+                    f"年期：<b>{result['window_years']}年</b></div>",
                     unsafe_allow_html=True,
                 )
 
-            # Benchmark metrics row
-            st.markdown("<br>", unsafe_allow_html=True)
-            bc1, bc2, bc3, bc4 = st.columns(4)
-            for col, title, val in [
-                (bc1, f"{benchmark} CAGR",  _fmt_pct(bm_m.get("cagr"))),
-                (bc2, f"{benchmark} 夏普",  _fmt_f(bm_m.get("sharpe"))),
-                (bc3, f"{benchmark} 最大回撤", _fmt_pct(bm_m.get("max_dd"))),
-                (bc4, f"{benchmark} 年化波動", _fmt_pct(bm_m.get("vol"))),
-            ]:
-                col.markdown(
-                    f"<div style='background:#0d1117; border:1px solid #333; "
-                    f"border-radius:6px; padding:10px; text-align:center;'>"
-                    f"<div style='font-size:13px; color:#888;'>{title}</div>"
-                    f"<div style='font-size:16px; font-weight:600; color:#aaa;'>{val}</div>"
-                    f"</div>",
-                    unsafe_allow_html=True,
+                # ── Performance chart ──────────────────────────────────────
+                st.markdown("### 📈 績效走勢對比")
+                fig = go.Figure()
+                pf_color = "#FF4B4B" if strategy_lbl == "買入持有" else "#FFD700"
+                if pf_s is not None and not pf_s.empty:
+                    fig.add_trace(go.Scatter(
+                        x=pf_s.index, y=pf_s.values, mode="lines",
+                        name=f"{strategy_lbl}（{', '.join(tickers_used)}）",
+                        line=dict(color=pf_color, width=2.5),
+                        hovertemplate="日期: %{x|%Y-%m-%d}<br>淨值: %{y:.1f}<extra></extra>",
+                    ))
+                if bm_s is not None and not bm_s.empty:
+                    fig.add_trace(go.Scatter(
+                        x=bm_s.index, y=bm_s.values, mode="lines",
+                        name=f"基準：{bm_ticker}",
+                        line=dict(color="#00D4FF", width=2, dash="dot"),
+                        hovertemplate="日期: %{x|%Y-%m-%d}<br>淨值: %{y:.1f}<extra></extra>",
+                    ))
+                fig.update_layout(
+                    height=380, margin=dict(l=0, r=0, t=20, b=20),
+                    paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                xanchor="right", x=1, font=dict(size=12, color="#ddd")),
+                    xaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                               tickfont=dict(size=12, color="#aaa")),
+                    yaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                               tickfont=dict(size=12, color="#aaa"),
+                               title=dict(text="淨值（初始=100）",
+                                          font=dict(size=12, color="#aaa"))),
+                    font=dict(size=12, color="#ddd"),
                 )
+                st.plotly_chart(fig, use_container_width=True)
 
-            # ── Per-ticker table ───────────────────────────────────────────
-            if result.get("per_ticker_metrics"):
+                # ── Metrics cards ──────────────────────────────────────────
+                st.markdown("### 📋 績效指標報告")
+                alpha_color = "#00FF7F" if (alpha is not None and alpha > 0) else "#FF4B4B"
+                mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+                for col_m, title, val, color in [
+                    (mc1, "策略 CAGR",   _fmt_pct(pf_m.get("cagr")),   "#00FF7F"),
+                    (mc2, "夏普比率",    _fmt_f(pf_m.get("sharpe")),   "#00D4FF"),
+                    (mc3, "最大回撤",    _fmt_pct(pf_m.get("max_dd")), "#FF4B4B"),
+                    (mc4, "年化波動",    _fmt_pct(pf_m.get("vol")),    "#FFD700"),
+                    (mc5, "超額報酬 α",  _fmt_pct(alpha),              alpha_color),
+                ]:
+                    col_m.markdown(
+                        f"<div style='background:#111827; border-left:3px solid {color}; "
+                        f"border-radius:6px; padding:12px; text-align:center;'>"
+                        f"<div style='font-size:13px; color:#aaa;'>{title}</div>"
+                        f"<div style='font-size:18px; font-weight:700; color:{color};'>{val}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                bc1, bc2, bc3, bc4 = st.columns(4)
+                for col_b, title, val in [
+                    (bc1, f"{bm_ticker} CAGR",     _fmt_pct(bm_m.get("cagr"))),
+                    (bc2, f"{bm_ticker} 夏普",     _fmt_f(bm_m.get("sharpe"))),
+                    (bc3, f"{bm_ticker} 最大回撤",  _fmt_pct(bm_m.get("max_dd"))),
+                    (bc4, f"{bm_ticker} 年化波動",  _fmt_pct(bm_m.get("vol"))),
+                ]:
+                    col_b.markdown(
+                        f"<div style='background:#0d1117; border:1px solid #333; "
+                        f"border-radius:6px; padding:10px; text-align:center;'>"
+                        f"<div style='font-size:13px; color:#888;'>{title}</div>"
+                        f"<div style='font-size:16px; font-weight:600; color:#aaa;'>{val}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                # ── Per-ticker contribution table ──────────────────────────
+                if result.get("per_ticker_metrics"):
+                    st.markdown("---")
+                    st.markdown("### 🔬 個股績效與貢獻度")
+                    rows_t = []
+                    total_portfolio_ret = pf_m.get("cagr")
+                    for t, m in result["per_ticker_metrics"].items():
+                        vol_flag  = hv.get(t, False)
+                        c_data    = contrib.get(t, {})
+                        rows_t.append({
+                            "代碼":       t,
+                            "CAGR":       _fmt_pct(m.get("cagr")),
+                            "夏普比率":   _fmt_f(m.get("sharpe")),
+                            "最大回撤":   _fmt_pct(m.get("max_dd")),
+                            "總回報":     f"{c_data.get('total_return_pct',0):+.1f}%",
+                            "組合貢獻":   f"{c_data.get('contribution_pct',0):+.1f}%",
+                            "風險標記":   "🔴 高波動" if vol_flag else "✅ 正常",
+                        })
+                    st.dataframe(pd.DataFrame(rows_t),
+                                 use_container_width=True, hide_index=True)
+
+                # ── Drawdown period analysis ───────────────────────────────
+                if dd_periods:
+                    st.markdown("---")
+                    st.markdown("### 📉 最大回撤週期分析")
+                    worst = dd_periods[0]
+                    prolonged = worst["duration_days"] > 180 and not worst["recovered"]
+                    banner_color = "#FF4B4B" if prolonged else "#FFD700"
+                    banner_text  = (
+                        "⚠️ 偵測到長期單邊下跌持倉過久（未恢復超過 180 天）——"
+                        "建議啟用動態止損以避免深度回撤。"
+                        if prolonged else
+                        f"✅ 最大回撤週期 {worst['duration_days']} 天，"
+                        f"{'已恢復' if worst['recovered'] else '尚未恢復'}。"
+                    )
+                    st.markdown(
+                        f"<div style='background:#1a0d0d; border-left:4px solid {banner_color}; "
+                        f"border-radius:6px; padding:10px 14px; margin-bottom:8px; "
+                        f"font-size:13px; color:{banner_color};'>{banner_text}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    dd_rows = []
+                    for d in dd_periods[:6]:
+                        dd_rows.append({
+                            "開始日期":     str(d["start_date"])[:10],
+                            "結束日期":     str(d["end_date"])[:10],
+                            "持續天數":     d["duration_days"],
+                            "最大跌幅":     f"{d['max_loss_pct']:.1f}%",
+                            "是否恢復":     "✅ 是" if d["recovered"] else "❌ 未恢復",
+                        })
+                    st.dataframe(pd.DataFrame(dd_rows),
+                                 use_container_width=True, hide_index=True)
+
+                # ── Gemini AI analysis report ──────────────────────────────
                 st.markdown("---")
-                st.markdown("### 🔬 個別股票績效")
-                rows = []
-                for t, m in result["per_ticker_metrics"].items():
-                    vol_flag = hv.get(t, False)
-                    rows.append({
-                        "代碼":          t,
-                        "CAGR":          _fmt_pct(m.get("cagr")),
-                        "夏普比率":       _fmt_f(m.get("sharpe")),
-                        "最大回撤":       _fmt_pct(m.get("max_dd")),
-                        "年化波動":       _fmt_pct(m.get("vol")),
-                        "風險標記":       "🔴 高波動" if vol_flag else "✅ 正常",
-                    })
-                st.dataframe(
-                    pd.DataFrame(rows),
-                    use_container_width=True,
-                    hide_index=True,
+                st.markdown("### 🤖 Gemini AI 量化分析報告")
+                gemini_key_val = (
+                    st.session_state.get("bt_gemini_key") or
+                    (st.secrets.get("GEMINI_API_KEY","") if hasattr(st,"secrets") else "") or
+                    __import__("os").environ.get("GEMINI_API_KEY","")
+                )
+                if gemini_key_val:
+                    if st.button("✨ 生成 AI 分析報告", key="gen_gemini_report"):
+                        with st.spinner("正在調用 Gemini AI 分析回測數據…"):
+                            report_text = generate_quant_report(result, gemini_key_val)
+                        if report_text:
+                            st.session_state["bt_gemini_report"] = report_text
+                        else:
+                            st.warning("AI 報告生成失敗，請檢查 API Key 是否有效。")
+                    if st.session_state.get("bt_gemini_report"):
+                        st.markdown(
+                            f"<div style='background:#0D1A2E; border-left:4px solid #00D4FF; "
+                            f"border-radius:8px; padding:16px; font-size:14px; "
+                            f"color:#E0E0E0; line-height:1.8;'>"
+                            f"{st.session_state['bt_gemini_report']}"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.info("💡 在「策略設定」頁籤中輸入 Gemini API Key 即可自動生成量化分析報告。")
+
+        # ──────────────────────────────────────────────────────────────────
+        # Tab 3 — Technical Indicator Comparison
+        # ──────────────────────────────────────────────────────────────────
+        with tab3:
+            st.markdown("### 📉 技術指標對比")
+            result = st.session_state.get("bt_result")
+            if not result or result.get("error"):
+                st.info("💡 請先在「策略設定」完成回測。")
+            else:
+                tickers_used = result["pf_tickers"]
+                years_used   = result.get("window_years", 3)
+
+                indicator = st.radio(
+                    "選擇指標",
+                    ["RSI", "MACD", "Bollinger Bands"],
+                    horizontal=True, key="bt_indicator",
                 )
 
-        elif result and result.get("error"):
-            st.error(f"⚠️ 回測失敗：{result['error']}")
+                colors = ["#FF4B4B", "#00D4FF", "#FFD700", "#00FF7F", "#FF8C00"]
+
+                if indicator == "RSI":
+                    fig_rsi = go.Figure()
+                    preset_now = RSI_PRESETS.get(
+                        st.session_state.get("bt_asset_class", "自定義"),
+                        RSI_PRESETS["自定義"]
+                    )
+                    for i, t in enumerate(tickers_used):
+                        with st.spinner(f"載入 {t} RSI…"):
+                            ohlcv = fetch_ohlcv(t, years_used)
+                        if ohlcv.empty:
+                            continue
+                        rsi_s = calc_rsi(ohlcv["Close"])
+                        fig_rsi.add_trace(go.Scatter(
+                            x=rsi_s.index, y=rsi_s.values,
+                            mode="lines", name=t,
+                            line=dict(color=colors[i % len(colors)], width=1.5),
+                            hovertemplate=f"{t} RSI: %{{y:.1f}}<extra></extra>",
+                        ))
+                    for level, color, label in [
+                        (preset_now["buy"],  "#00FF7F", f"買入線 {preset_now['buy']}"),
+                        (preset_now["sell"], "#FF4B4B", f"賣出線 {preset_now['sell']}"),
+                        (50, "#888888", "中線 50"),
+                    ]:
+                        fig_rsi.add_hline(
+                            y=level, line_dash="dash",
+                            line_color=color,
+                            annotation_text=label,
+                            annotation_font_color=color,
+                        )
+                    fig_rsi.update_layout(
+                        height=380, title="RSI 對比",
+                        paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+                        legend=dict(orientation="h", y=1.05, font=dict(size=12, color="#ddd")),
+                        xaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                                   tickfont=dict(size=12, color="#aaa")),
+                        yaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                                   tickfont=dict(size=12, color="#aaa"),
+                                   range=[0, 100]),
+                        font=dict(size=12, color="#ddd"),
+                        margin=dict(l=0, r=0, t=40, b=0),
+                    )
+                    st.plotly_chart(fig_rsi, use_container_width=True)
+
+                elif indicator == "MACD":
+                    for i, t in enumerate(tickers_used):
+                        with st.spinner(f"載入 {t} MACD…"):
+                            ohlcv = fetch_ohlcv(t, years_used)
+                        if ohlcv.empty:
+                            continue
+                        macd_l, signal_l, hist_l = calc_macd(ohlcv["Close"])
+                        fig_m = go.Figure()
+                        fig_m.add_trace(go.Scatter(
+                            x=macd_l.index, y=macd_l.values, mode="lines",
+                            name="MACD", line=dict(color="#00D4FF", width=1.5)))
+                        fig_m.add_trace(go.Scatter(
+                            x=signal_l.index, y=signal_l.values, mode="lines",
+                            name="Signal", line=dict(color="#FFD700", width=1.5)))
+                        hist_colors = ["#00FF7F" if v >= 0 else "#FF4B4B"
+                                       for v in hist_l.values]
+                        fig_m.add_trace(go.Bar(
+                            x=hist_l.index, y=hist_l.values,
+                            name="Histogram", marker_color=hist_colors, opacity=0.6))
+                        fig_m.add_hline(y=0, line_color="#555", line_dash="dot")
+                        fig_m.update_layout(
+                            height=300, title=f"{t} MACD",
+                            paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+                            legend=dict(orientation="h", y=1.05,
+                                        font=dict(size=12, color="#ddd")),
+                            xaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                                       tickfont=dict(size=12, color="#aaa")),
+                            yaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                                       tickfont=dict(size=12, color="#aaa")),
+                            font=dict(size=12, color="#ddd"),
+                            margin=dict(l=0, r=0, t=40, b=0),
+                        )
+                        st.plotly_chart(fig_m, use_container_width=True)
+
+                else:  # Bollinger Bands
+                    for i, t in enumerate(tickers_used[:3]):
+                        with st.spinner(f"載入 {t} Bollinger…"):
+                            ohlcv = fetch_ohlcv(t, years_used)
+                        if ohlcv.empty:
+                            continue
+                        upper, mid, lower = calc_bollinger(ohlcv["Close"])
+                        fig_bb = go.Figure()
+                        fig_bb.add_trace(go.Scatter(
+                            x=upper.index, y=upper.values, mode="lines",
+                            name="上軌", line=dict(color="#FF4B4B", width=1, dash="dash")))
+                        fig_bb.add_trace(go.Scatter(
+                            x=mid.index, y=mid.values, mode="lines",
+                            name="中軌 SMA20", line=dict(color="#00D4FF", width=1.5)))
+                        fig_bb.add_trace(go.Scatter(
+                            x=lower.index, y=lower.values, mode="lines",
+                            name="下軌", line=dict(color="#00FF7F", width=1, dash="dash"),
+                            fill="tonexty", fillcolor="rgba(0,212,255,0.04)"))
+                        fig_bb.add_trace(go.Scatter(
+                            x=ohlcv["Close"].index, y=ohlcv["Close"].values,
+                            mode="lines", name="收盤價",
+                            line=dict(color="#FFD700", width=1.5)))
+                        fig_bb.update_layout(
+                            height=320, title=f"{t} Bollinger Bands (20,2)",
+                            paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+                            legend=dict(orientation="h", y=1.05,
+                                        font=dict(size=12, color="#ddd")),
+                            xaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                                       tickfont=dict(size=12, color="#aaa")),
+                            yaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                                       tickfont=dict(size=12, color="#aaa")),
+                            font=dict(size=12, color="#ddd"),
+                            margin=dict(l=0, r=0, t=40, b=0),
+                        )
+                        st.plotly_chart(fig_bb, use_container_width=True)
+
+        # ──────────────────────────────────────────────────────────────────
+        # Tab 4 — Fund Flow Analysis
+        # ──────────────────────────────────────────────────────────────────
+        with tab4:
+            st.markdown("### 💹 資金流入分析")
+            st.caption("OBV（能量潮）反映資金累積趨勢；MFI（資金流量指標）衡量買賣力道強弱")
+            result = st.session_state.get("bt_result")
+            if not result or result.get("error"):
+                st.info("💡 請先在「策略設定」完成回測。")
+            else:
+                tickers_used = result["pf_tickers"]
+                years_used   = result.get("window_years", 3)
+                colors_ff    = ["#00D4FF", "#FFD700", "#FF4B4B", "#00FF7F", "#FF8C00"]
+
+                flow_mode = st.radio(
+                    "指標選擇", ["OBV（能量潮）", "MFI（資金流量）"],
+                    horizontal=True, key="bt_flow_mode",
+                )
+
+                if flow_mode == "OBV（能量潮）":
+                    fig_obv = go.Figure()
+                    for i, t in enumerate(tickers_used):
+                        with st.spinner(f"載入 {t} OBV…"):
+                            ohlcv = fetch_ohlcv(t, years_used)
+                        if ohlcv.empty:
+                            continue
+                        obv_s = calc_obv(ohlcv["Close"], ohlcv["Volume"])
+                        obv_norm = (obv_s / obv_s.abs().max() * 100).rename(t)
+                        fig_obv.add_trace(go.Scatter(
+                            x=obv_norm.index, y=obv_norm.values, mode="lines",
+                            name=t, line=dict(color=colors_ff[i % len(colors_ff)], width=1.5),
+                            hovertemplate=f"{t} OBV(norm): %{{y:.1f}}<extra></extra>",
+                        ))
+                    fig_obv.add_hline(y=0, line_color="#555", line_dash="dot",
+                                      annotation_text="基準線", annotation_font_color="#888")
+                    fig_obv.update_layout(
+                        height=380, title="OBV 能量潮對比（已正規化）",
+                        paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+                        legend=dict(orientation="h", y=1.05,
+                                    font=dict(size=12, color="#ddd")),
+                        xaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                                   tickfont=dict(size=12, color="#aaa")),
+                        yaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                                   tickfont=dict(size=12, color="#aaa")),
+                        font=dict(size=12, color="#ddd"),
+                        margin=dict(l=0, r=0, t=40, b=0),
+                    )
+                    st.plotly_chart(fig_obv, use_container_width=True)
+                    st.caption(
+                        "📌 OBV 持續上升 = 資金持續流入（牛市訊號）；"
+                        "OBV 下行背離股價 = 警惕潛在賣壓。"
+                    )
+
+                else:  # MFI
+                    for i, t in enumerate(tickers_used):
+                        with st.spinner(f"載入 {t} MFI…"):
+                            ohlcv = fetch_ohlcv(t, years_used)
+                        if ohlcv.empty:
+                            continue
+                        mfi_s = calc_mfi(
+                            ohlcv["High"], ohlcv["Low"],
+                            ohlcv["Close"], ohlcv["Volume"]
+                        )
+                        # latest MFI gauge
+                        latest_mfi = float(mfi_s.dropna().iloc[-1]) if not mfi_s.dropna().empty else 50
+                        fig_mfi = go.Figure()
+                        fig_mfi.add_trace(go.Scatter(
+                            x=mfi_s.index, y=mfi_s.values, mode="lines",
+                            name=f"{t} MFI",
+                            line=dict(color=colors_ff[i % len(colors_ff)], width=1.5),
+                            hovertemplate=f"MFI: %{{y:.1f}}<extra></extra>",
+                        ))
+                        fig_mfi.add_hline(y=80, line_color="#FF4B4B", line_dash="dash",
+                                          annotation_text="超買 80",
+                                          annotation_font_color="#FF4B4B")
+                        fig_mfi.add_hline(y=20, line_color="#00FF7F", line_dash="dash",
+                                          annotation_text="超賣 20",
+                                          annotation_font_color="#00FF7F")
+                        status = "超買" if latest_mfi >= 80 else "超賣" if latest_mfi <= 20 else "中性"
+                        status_c = "#FF4B4B" if status == "超買" else "#00FF7F" if status == "超賣" else "#FFD700"
+                        fig_mfi.update_layout(
+                            height=300,
+                            title=f"{t} MFI — 最新值: {latest_mfi:.1f} "
+                                  f"<span style='color:{status_c}'>({status})</span>",
+                            paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+                            legend=dict(orientation="h", y=1.05,
+                                        font=dict(size=12, color="#ddd")),
+                            xaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                                       tickfont=dict(size=12, color="#aaa")),
+                            yaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                                       tickfont=dict(size=12, color="#aaa"),
+                                       range=[0, 100]),
+                            font=dict(size=12, color="#ddd"),
+                            margin=dict(l=0, r=0, t=40, b=0),
+                        )
+                        st.plotly_chart(fig_mfi, use_container_width=True)
+                    st.caption(
+                        "📌 MFI > 80 = 資金過度集中（超買）；MFI < 20 = 籌碼出清（超賣）。"
+                        "配合 RSI 使用可提高入場準確度。"
+                    )
 
     # ══════════════════════════════════════════════════════════════════════════
     # PAGE 5 — MPF 智投
