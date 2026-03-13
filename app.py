@@ -403,179 +403,152 @@ def main() -> None:
         except Exception as _macro_err:
             st.warning(f"⚠️ 宏觀情緒圖表加載失敗，請重新整理頁面。（{_macro_err}）")
 
-        st.markdown("根據您自定義的基本面條件，自動篩選符合條件的優質美股")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("市值門檻",  f"> ${min_cap}B")
-        col2.metric("淨利率",    f"> {min_margin}%")
-        col3.metric("營收增長",  f"> {min_growth}%")
-        col4.metric("P/E Ratio", f"< {max_pe}")
-
+        # ── Financial Calendar ─────────────────────────────────────────────
         st.markdown("---")
+        st.markdown("### 📅 財經月曆")
+        st.caption("重要財報、FOMC 會議、經濟數據發布（🔴高/🟡中/🟢低重要度）")
 
-        if st.button("🔄 開始篩選（需要約1-2分鐘）",
-                     type="primary", use_container_width=True):
-            st.session_state["screening"]     = True
-            st.session_state["results"]       = None
-            st.session_state["screen_params"] = params
+        _CALENDAR = [
+            {"date": "2026-03-19", "event": "FOMC 利率決議",             "imp": "🔴", "impact": "聯準會宣布利率決定，影響全市場風險偏好"},
+            {"date": "2026-03-28", "event": "美國 PCE 通脹數據",          "imp": "🔴", "impact": "聯準會首選通脹指標，直接影響加息預期"},
+            {"date": "2026-04-02", "event": "美國非農就業 (NFP)",          "imp": "🔴", "impact": "就業數據反映經濟健康，超預期數值驅動美元升值"},
+            {"date": "2026-04-10", "event": "美國 CPI 通脹數據",           "imp": "🔴", "impact": "核心通脹指標，高於預期往往壓制股市"},
+            {"date": "2026-04-15", "event": "摩根大通財報 (JPM)",          "imp": "🟡", "impact": "金融業財報季開始，設定市場基調"},
+            {"date": "2026-04-22", "event": "特斯拉財報 (TSLA)",           "imp": "🟡", "impact": "電動車龍頭業績影響成長股情緒"},
+            {"date": "2026-04-29", "event": "Meta 財報 (META)",            "imp": "🟡", "impact": "AI 廣告支出與用戶增長指引"},
+            {"date": "2026-04-30", "event": "FOMC 利率決議 + 記者會",      "imp": "🔴", "impact": "Powell 記者會措辭影響市場全年走向"},
+            {"date": "2026-05-07", "event": "蘋果財報 (AAPL)",             "imp": "🟡", "impact": "服務收入與 iPhone 出貨指引"},
+            {"date": "2026-05-08", "event": "Amazon 財報 (AMZN)",          "imp": "🟡", "impact": "AWS 雲端增長與電商邊際利潤"},
+            {"date": "2026-05-08", "event": "美國非農就業 (NFP)",          "imp": "🔴", "impact": "就業數據影響降息時機預期"},
+            {"date": "2026-05-21", "event": "NVIDIA 財報 (NVDA)",          "imp": "🔴", "impact": "AI 晶片需求指引，半導體板塊風向標"},
+            {"date": "2026-05-28", "event": "GDP 初值 Q1 2026",            "imp": "🟡", "impact": "確認經濟擴張或衰退路徑"},
+            {"date": "2026-06-11", "event": "FOMC 利率決議 + 點陣圖更新",  "imp": "🔴", "impact": "最新利率路徑預期，全年最重要的 Fed 會議之一"},
+            {"date": "2026-06-12", "event": "美國 CPI 通脹數據",           "imp": "🔴", "impact": "中期通脹走向確認"},
+            {"date": "2026-07-10", "event": "美國 CPI 通脹數據",           "imp": "🟡", "impact": "Q3 開局通脹觀察"},
+            {"date": "2026-07-29", "event": "FOMC 利率決議",               "imp": "🔴", "impact": "Q3 利率決定"},
+            {"date": "2026-09-16", "event": "FOMC 利率決議 + 點陣圖更新",  "imp": "🔴", "impact": "秋季利率路徑更新，影響年底行情"},
+        ]
+        today = datetime.today().date()
+        upcoming = [e for e in _CALENDAR if datetime.strptime(e["date"], "%Y-%m-%d").date() >= today][:8]
 
-        if st.session_state.get("screening") and not st.session_state.get("results"):
-            progress_bar = st.progress(0)
-            status_text  = st.empty()
-            stocks_data  = []
-            total        = len(SCREENER_STOCKS)
-            screen_err   = None
-            try:
-                for i, ticker in enumerate(SCREENER_STOCKS):
-                    status_text.text(f"正在分析 {ticker}… ({i+1}/{total})")
-                    progress_bar.progress((i + 1) / total)
-                    try:
-                        data = get_stock_info(ticker)
-                        if data:
-                            stocks_data.append(data)
-                    except Exception:
-                        pass
-                    time.sleep(0.05)
-                used_params = st.session_state.get("screen_params", params)
-                results     = screen_stocks(stocks_data, *used_params)
-                st.session_state["results"] = results
-            except Exception as _se:
-                screen_err = str(_se)
-                st.session_state["results"] = []
-            finally:
-                st.session_state["screening"] = False
-                progress_bar.empty()
-                status_text.empty()
-            if screen_err:
-                st.error(f"❌ 篩選過程發生錯誤：{screen_err}　請重試或稍後再試。")
-
-        if st.session_state.get("results"):
-            results = st.session_state["results"]
-            st.success(
-                f"✅ 篩選完成！找到 **{len(results)}** 支符合條件的股票，"
-                f"點擊代碼即可查看完整診斷"
-            )
-            hcols = st.columns([1, 2.5, 1.5, 1.2, 1, 1, 1, 0.8, 0.8])
-            for txt, col in zip(
-                ["代碼", "公司名稱", "產業", "市值", "股價", "淨利率", "營收增長", "P/E", "⭐"],
-                hcols,
-            ):
-                col.markdown(
-                    f"<span style='color:#aaa; font-size:12px;'>{txt}</span>",
+        if upcoming:
+            _cal_cols = st.columns(2)
+            for ci, ev in enumerate(upcoming):
+                ev_date = datetime.strptime(ev["date"], "%Y-%m-%d").date()
+                days_to = (ev_date - today).days
+                days_str = f"還有 {days_to} 天" if days_to > 0 else "今日"
+                border = "#FF4B4B" if ev["imp"] == "🔴" else "#FFD700" if ev["imp"] == "🟡" else "#00FF7F"
+                _cal_cols[ci % 2].markdown(
+                    f"<div style='border-left:4px solid {border}; border-radius:6px; "
+                    f"background:#F8F9FA; padding:10px 14px; margin-bottom:8px;'>"
+                    f"<div style='font-size:12px; color:#888;'>{ev['date']}  ·  {days_str}</div>"
+                    f"<div style='font-weight:700; font-size:14px;'>{ev['imp']} {ev['event']}</div>"
+                    f"<div style='font-size:12px; color:#555; margin-top:4px;'>{ev['impact']}</div>"
+                    f"</div>",
                     unsafe_allow_html=True,
                 )
-            st.markdown("<hr style='margin:4px 0 8px 0; border-color:#2A2D3E;'>",
-                        unsafe_allow_html=True)
 
-            for stock in results:
-                t     = stock["ticker"]
-                in_wl = t in st.session_state["watchlist"]
-                rcols = st.columns([1, 2.5, 1.5, 1.2, 1, 1, 1, 0.8, 0.8])
-                if rcols[0].button(f"**{t}**", key=f"goto_{t}",
-                                   use_container_width=True):
-                    navigate_to_diagnosis(stock)
-                rcols[1].markdown(
-                    f"<span style='font-size:13px;'>{stock['name']}</span>",
-                    unsafe_allow_html=True)
-                rcols[2].markdown(
-                    f"<span style='color:#aaa; font-size:12px;'>{stock['sector']}</span>",
-                    unsafe_allow_html=True)
-                rcols[3].markdown(
-                    f"<span style='font-size:13px;'>{format_market_cap(stock['market_cap'])}</span>",
-                    unsafe_allow_html=True)
-                rcols[4].markdown(
-                    f"<span style='color:#00D4FF; font-size:13px;'>${stock['price']:.2f}</span>",
-                    unsafe_allow_html=True)
-                rcols[5].markdown(
-                    f"<span style='color:#00FF7F; font-size:13px;'>{stock['net_margin']*100:.1f}%</span>",
-                    unsafe_allow_html=True)
-                rcols[6].markdown(
-                    f"<span style='color:#FFD700; font-size:13px;'>{stock['revenue_growth']*100:.1f}%</span>",
-                    unsafe_allow_html=True)
-                rcols[7].markdown(
-                    f"<span style='font-size:13px;'>{stock['pe_ratio']:.1f}</span>",
-                    unsafe_allow_html=True)
-                wl_label = "⭐" if in_wl else "☆"
-                if rcols[8].button(wl_label, key=f"wl_tog_{t}"):
-                    if in_wl:
-                        st.session_state["watchlist"].remove(t)
-                    else:
-                        st.session_state["watchlist"].append(t)
-                    save_watchlist(st.session_state["watchlist"])
-                    st.rerun()
-                st.markdown("<hr style='margin:2px 0; border-color:#1E2130;'>",
-                            unsafe_allow_html=True)
+        # ── KOL / Analyst Tracker ──────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 🧠 精選分析師與 KOL 追蹤")
+        st.caption(
+            "以下為長期深入研究美股、具備良好信譽的專業分析師與意見領袖，"
+            "根據其歷史準確率與研究深度篩選。每日零點自動更新關注焦點。"
+        )
 
-            # ── Screener → Backtest integration button ─────────────────────
-            df = pd.DataFrame(results)
-            screener_tickers = [s["ticker"] for s in results]
-            bt_col1, bt_col2 = st.columns([3, 1])
-            with bt_col1:
-                st.markdown(
-                    f"<div style='background:#0D1A2E; border:1px solid #00D4FF44; "
-                    f"border-radius:6px; padding:8px 14px; font-size:13px; color:#00D4FF;'>"
-                    f"📊 篩選出 <b>{len(screener_tickers)}</b> 支股票，可直接送往回測引擎進行批量比較</div>",
-                    unsafe_allow_html=True,
-                )
-            with bt_col2:
-                if st.button("🚀 批量回測", type="primary",
-                             key="screen_to_bt", use_container_width=True):
-                    top5 = screener_tickers[:5]
-                    st.session_state["bt_tickers"]       = ", ".join(top5)
-                    st.session_state["bt_from_screener"] = True
-                    st.session_state["nav_page"]         = "📊 美股回測"
-                    st.rerun()
-            st.markdown("<br>", unsafe_allow_html=True)
+        _KOLS = [
+            {
+                "name":     "Howard Marks",
+                "org":      "Oaktree Capital",
+                "focus":    "信用周期、風險評估、市場備忘錄",
+                "platform": "oaktreecapital.com",
+                "stance":   "謹慎",
+                "stanceColor": "#FF8C00",
+                "picks":    ["HYG", "LQD", "防禦型資產"],
+                "note":     "最新備忘錄：強調風險溢價不足，建議提高現金比重",
+                "rep":      "⭐⭐⭐⭐⭐",
+            },
+            {
+                "name":     "Cathie Wood",
+                "org":      "ARK Invest",
+                "focus":    "顛覆性創新：AI、基因組學、加密貨幣",
+                "platform": "ARK ETFs / X @CathieDWood",
+                "stance":   "積極做多",
+                "stanceColor": "#00CC44",
+                "picks":    ["TSLA", "NVDA", "COIN", "ROKU"],
+                "note":     "看好 AI 長期複合增長，短期波動不影響 5 年目標",
+                "rep":      "⭐⭐⭐⭐",
+            },
+            {
+                "name":     "Adam Khoo",
+                "org":      "Adam Khoo Learning Technologies",
+                "focus":    "價值投資、技術分析結合、波段操作",
+                "platform": "YouTube / courses",
+                "stance":   "中性偏多",
+                "stanceColor": "#0066CC",
+                "picks":    ["SPY", "QQQ", "AAPL", "MSFT"],
+                "note":     "當前市場波動屬正常回調，建議逢低分批佈局優質大型股",
+                "rep":      "⭐⭐⭐⭐",
+            },
+            {
+                "name":     "Jeremy Siegel",
+                "org":      "Wharton School / WisdomTree",
+                "focus":    "長期股票市場、退休投資組合",
+                "platform": "CNBC / Bloomberg",
+                "stance":   "長期樂觀",
+                "stanceColor": "#00CC44",
+                "picks":    ["VT", "VIG", "高股息ETF"],
+                "note":     "股票長期跑贏通脹具壓倒性優勢，不建議擇時進出",
+                "rep":      "⭐⭐⭐⭐⭐",
+            },
+            {
+                "name":     "Michael Burry",
+                "org":      "Scion Asset Management",
+                "focus":    "逆向投資、系統性風險、做空策略",
+                "platform": "X (間歇性) / SEC 13F",
+                "stance":   "偏空",
+                "stanceColor": "#FF4B4B",
+                "picks":    ["避險工具", "短期債券", "VIX"],
+                "note":     "13F 顯示持倉集中防禦性資產，警示市場過度樂觀",
+                "rep":      "⭐⭐⭐⭐",
+            },
+            {
+                "name":     "Joseph Carlson",
+                "org":      "個人投資者 / YouTube",
+                "focus":    "成長股 + 股息再投資、個人持倉透明化",
+                "platform": "YouTube @josephcarlsonshow",
+                "stance":   "長期持有",
+                "stanceColor": "#0066CC",
+                "picks":    ["MSFT", "AAPL", "V", "MA", "AMZN"],
+                "note":     "強調複利長期增長，月更持倉，持倉高透明度",
+                "rep":      "⭐⭐⭐⭐",
+            },
+        ]
 
-            st.markdown("### 📊 篩選結果圖表")
-            try:
-                c1, c2 = st.columns(2)
-                with c1:
-                    fig_cap = px.bar(
-                        df.head(10), x="ticker", y="market_cap",
-                        title="市值比較",
-                        color="market_cap", color_continuous_scale="Blues",
-                        labels={"market_cap": "市值 (USD)", "ticker": "股票代碼"},
+        _kol_refresh = datetime.now().strftime("%Y-%m-%d 00:00")
+        st.caption(f"資料快照：{_kol_refresh} UTC  ·  點擊個股代碼前往個股診斷")
+
+        for kol in _KOLS:
+            with st.expander(f"{kol['name']}  ·  {kol['org']}  ·  {kol['rep']}", expanded=False):
+                kc1, kc2 = st.columns([2, 1])
+                with kc1:
+                    st.markdown(
+                        f"**研究方向：** {kol['focus']}  \n"
+                        f"**平台：** {kol['platform']}  \n"
+                        f"**市場立場：** "
+                        f"<span style='color:{kol['stanceColor']}; font-weight:700;'>{kol['stance']}</span>",
+                        unsafe_allow_html=True,
                     )
-                    fig_cap.update_layout(
-                        template="plotly_dark",
-                        paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
-                        showlegend=False,
-                        hovermode="closest",
-                    )
-                    fig_cap.update_yaxes(tickformat=".2s")
-                    st.plotly_chart(fig_cap, use_container_width=True)
-                with c2:
-                    fig_scatter = px.scatter(
-                        df, x="pe_ratio", y="net_margin",
-                        size="market_cap", color="revenue_growth",
-                        hover_data=["ticker", "name"],
-                        title="P/E vs 淨利率（氣泡=市值）",
-                        labels={"pe_ratio": "P/E Ratio", "net_margin": "淨利率",
-                                "revenue_growth": "營收增長"},
-                        color_continuous_scale="Teal",
-                    )
-                    fig_scatter.update_layout(
-                        template="plotly_dark",
-                        paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
-                        hovermode="closest",
-                    )
-                    st.plotly_chart(fig_scatter, use_container_width=True)
-            except Exception as _chart_err:
-                st.warning(f"⚠️ 篩選結果圖表加載失敗：{_chart_err}")
-
-        elif not st.session_state.get("screening"):
-            st.info("👆 點擊上方按鈕開始篩選股票")
-            with st.expander("📖 篩選邏輯說明"):
-                st.markdown(f"""
-| 指標 | 條件 | 說明 |
-|------|------|------|
-| 市值 | > ${min_cap}B | 確保流動性 |
-| 淨利率 | > {min_margin}% | 良好獲利能力 |
-| 營收增長 | > {min_growth}% | 確保成長動能 |
-| P/E Ratio | < {max_pe} | 合理估值 |
-
-資料來源：Yahoo Finance (yfinance)
-                """)
+                    st.info(f"💡 {kol['note']}")
+                with kc2:
+                    st.markdown("**關注標的：**")
+                    for pk in kol["picks"]:
+                        if st.button(pk, key=f"kol_{kol['name']}_{pk}",
+                                     use_container_width=True):
+                            st.session_state["diag_ticker"] = pk
+                            st.session_state["nav_page"]    = "🔬 個股診斷 (Micro)"
+                            st.session_state["auto_fetch"]  = True
+                            st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════════
     # PAGE 2 — Stock Diagnosis
@@ -1268,9 +1241,162 @@ def main() -> None:
             )
             st.session_state["bt_from_screener"] = False
 
-        tab1, tab2, tab3, tab4 = st.tabs(
-            ["⚙️ 策略設定", "📈 績效報告", "📉 技術指標對比", "💹 資金流入分析"]
+        tab0, tab1, tab2, tab3, tab4 = st.tabs(
+            ["🔍 股票篩選", "⚙️ 策略設定", "📈 績效報告", "📉 技術指標對比", "💹 資金流入分析"]
         )
+
+        # ──────────────────────────────────────────────────────────────────
+        # Tab 0 — Stock Screener (migrated from Macro page)
+        # ──────────────────────────────────────────────────────────────────
+        with tab0:
+            st.markdown("### 🔍 優質美股篩選器")
+            st.caption("根據自定義基本面條件，自動篩選符合條件的優質股票，並可一鍵送往回測引擎")
+
+            sc_c1, sc_c2, sc_c3, sc_c4 = st.columns(4)
+            sc_c1.metric("市值門檻",  f"> ${min_cap}B")
+            sc_c2.metric("淨利率",    f"> {min_margin}%")
+            sc_c3.metric("營收增長",  f"> {min_growth}%")
+            sc_c4.metric("P/E Ratio", f"< {max_pe}")
+            st.caption("💡 在左側邊欄「⚙️ 篩選設定」調整上述條件")
+            st.markdown("---")
+
+            if st.button("🔄 開始篩選（需要約1-2分鐘）",
+                         type="primary", use_container_width=True, key="bt_screen_run"):
+                st.session_state["screening"]     = True
+                st.session_state["results"]       = None
+                st.session_state["screen_params"] = params
+
+            if st.session_state.get("screening") and not st.session_state.get("results"):
+                progress_bar = st.progress(0)
+                status_text  = st.empty()
+                stocks_data  = []
+                total        = len(SCREENER_STOCKS)
+                screen_err   = None
+                try:
+                    for i, ticker in enumerate(SCREENER_STOCKS):
+                        status_text.text(f"正在分析 {ticker}… ({i+1}/{total})")
+                        progress_bar.progress((i + 1) / total)
+                        try:
+                            data = get_stock_info(ticker)
+                            if data:
+                                stocks_data.append(data)
+                        except Exception:
+                            pass
+                        time.sleep(0.05)
+                    used_params = st.session_state.get("screen_params", params)
+                    results     = screen_stocks(stocks_data, *used_params)
+                    st.session_state["results"] = results
+                except Exception as _se:
+                    screen_err = str(_se)
+                    st.session_state["results"] = []
+                finally:
+                    st.session_state["screening"] = False
+                    progress_bar.empty()
+                    status_text.empty()
+                if screen_err:
+                    st.error(f"❌ 篩選過程發生錯誤：{screen_err}　請重試或稍後再試。")
+
+            if st.session_state.get("results"):
+                results = st.session_state["results"]
+                st.success(f"✅ 篩選完成！找到 **{len(results)}** 支符合條件的股票")
+
+                hcols = st.columns([1, 2.5, 1.5, 1.2, 1, 1, 1, 0.8, 0.8])
+                for txt, col in zip(
+                    ["代碼", "公司名稱", "產業", "市值", "股價", "淨利率", "營收增長", "P/E", "⭐"],
+                    hcols,
+                ):
+                    col.markdown(f"<span style='color:#888; font-size:12px;'>{txt}</span>",
+                                 unsafe_allow_html=True)
+                st.markdown("<hr style='margin:4px 0 8px 0; border-color:#ddd;'>",
+                            unsafe_allow_html=True)
+
+                for stock in results:
+                    t     = stock["ticker"]
+                    in_wl = t in st.session_state["watchlist"]
+                    rcols = st.columns([1, 2.5, 1.5, 1.2, 1, 1, 1, 0.8, 0.8])
+                    if rcols[0].button(f"**{t}**", key=f"sc_goto_{t}", use_container_width=True):
+                        navigate_to_diagnosis(stock)
+                    rcols[1].markdown(f"<span style='font-size:13px;'>{stock['name']}</span>",
+                                      unsafe_allow_html=True)
+                    rcols[2].markdown(f"<span style='color:#666; font-size:12px;'>{stock['sector']}</span>",
+                                      unsafe_allow_html=True)
+                    rcols[3].markdown(f"<span style='font-size:13px;'>{format_market_cap(stock['market_cap'])}</span>",
+                                      unsafe_allow_html=True)
+                    rcols[4].markdown(f"<span style='color:#0066CC; font-size:13px;'>${stock['price']:.2f}</span>",
+                                      unsafe_allow_html=True)
+                    rcols[5].markdown(f"<span style='color:#009900; font-size:13px;'>{stock['net_margin']*100:.1f}%</span>",
+                                      unsafe_allow_html=True)
+                    rcols[6].markdown(f"<span style='color:#CC7700; font-size:13px;'>{stock['revenue_growth']*100:.1f}%</span>",
+                                      unsafe_allow_html=True)
+                    rcols[7].markdown(f"<span style='font-size:13px;'>{stock['pe_ratio']:.1f}</span>",
+                                      unsafe_allow_html=True)
+                    wl_label = "⭐" if in_wl else "☆"
+                    if rcols[8].button(wl_label, key=f"sc_wl_{t}"):
+                        if in_wl:
+                            st.session_state["watchlist"].remove(t)
+                        else:
+                            st.session_state["watchlist"].append(t)
+                        save_watchlist(st.session_state["watchlist"])
+                        st.rerun()
+                    st.markdown("<hr style='margin:2px 0; border-color:#eee;'>",
+                                unsafe_allow_html=True)
+
+                df_sc = pd.DataFrame(results)
+                sc_tickers = [s["ticker"] for s in results]
+                sc_bt1, sc_bt2 = st.columns([3, 1])
+                with sc_bt1:
+                    st.info(f"📊 篩選出 **{len(sc_tickers)}** 支股票，可切換至「⚙️ 策略設定」頁籤執行批量回測")
+                with sc_bt2:
+                    if st.button("🚀 送往回測", type="primary",
+                                 key="sc_to_bt", use_container_width=True):
+                        top5 = sc_tickers[:5]
+                        st.session_state["bt_tickers"]       = ", ".join(top5)
+                        st.session_state["bt_from_screener"] = True
+                        st.rerun()
+
+                st.markdown("### 📊 篩選結果圖表")
+                try:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        fig_cap = px.bar(
+                            df_sc.head(10), x="ticker", y="market_cap",
+                            title="市值比較",
+                            color="market_cap", color_continuous_scale="Blues",
+                            labels={"market_cap": "市值 (USD)", "ticker": "代碼"},
+                        )
+                        fig_cap.update_layout(paper_bgcolor="#FFFFFF", plot_bgcolor="#F8F9FA",
+                                              showlegend=False, margin=dict(t=40, b=20))
+                        fig_cap.update_yaxes(tickformat=".2s")
+                        st.plotly_chart(fig_cap, use_container_width=True)
+                    with c2:
+                        fig_sc = px.scatter(
+                            df_sc, x="pe_ratio", y="net_margin",
+                            size="market_cap", color="revenue_growth",
+                            hover_data=["ticker", "name"],
+                            title="P/E vs 淨利率（氣泡=市值）",
+                            labels={"pe_ratio": "P/E", "net_margin": "淨利率",
+                                    "revenue_growth": "營收增長"},
+                            color_continuous_scale="Teal",
+                        )
+                        fig_sc.update_layout(paper_bgcolor="#FFFFFF", plot_bgcolor="#F8F9FA",
+                                             margin=dict(t=40, b=20))
+                        st.plotly_chart(fig_sc, use_container_width=True)
+                except Exception as _ce:
+                    st.warning(f"⚠️ 圖表加載失敗：{_ce}")
+
+            elif not st.session_state.get("screening"):
+                st.info("👆 點擊上方按鈕開始篩選股票")
+                with st.expander("📖 篩選邏輯說明"):
+                    st.markdown(f"""
+| 指標 | 條件 | 說明 |
+|------|------|------|
+| 市值 | > ${min_cap}B | 確保流動性充足 |
+| 淨利率 | > {min_margin}% | 良好獲利能力 |
+| 營收增長 | > {min_growth}% | 確保成長動能 |
+| P/E Ratio | < {max_pe} | 合理估值範圍 |
+
+資料來源：Yahoo Finance (yfinance)
+                    """)
 
         # ──────────────────────────────────────────────────────────────────
         # Tab 1 — Strategy Setup
@@ -1427,13 +1553,37 @@ def main() -> None:
                 st.markdown("### 📈 績效走勢對比")
                 fig = go.Figure()
                 pf_color = "#FF4B4B" if strategy_lbl == "買入持有" else "#FFD700"
+
+                # Individual ticker lines (dotted, dimmer) — only when multi-stock
+                _IND_COLORS = ["#FF9F7F", "#7FD4FF", "#CCFF99", "#FFD700", "#CC99FF",
+                               "#FF77AA", "#99FFEE", "#FFC0CB", "#AAD4FF", "#FFE066"]
+                ind_series = result.get("individual_series", {})
+                if len(tickers_used) > 1:
+                    for idx, t in enumerate(tickers_used):
+                        s_ind = ind_series.get(t)
+                        if s_ind is not None and not s_ind.empty:
+                            fig.add_trace(go.Scatter(
+                                x=s_ind.index, y=s_ind.values, mode="lines",
+                                name=f"{t}（個別）",
+                                line=dict(color=_IND_COLORS[idx % len(_IND_COLORS)],
+                                          width=1.2, dash="dot"),
+                                opacity=0.7,
+                                hovertemplate=f"{t} %{{x|%Y-%m-%d}}: %{{y:.1f}}<extra></extra>",
+                            ))
+
+                # Combined portfolio line (bold)
                 if pf_s is not None and not pf_s.empty:
+                    lbl = (f"{strategy_lbl}（{tickers_used[0]}）"
+                           if len(tickers_used) == 1
+                           else f"{strategy_lbl} 等權組合")
                     fig.add_trace(go.Scatter(
                         x=pf_s.index, y=pf_s.values, mode="lines",
-                        name=f"{strategy_lbl}（{', '.join(tickers_used)}）",
+                        name=lbl,
                         line=dict(color=pf_color, width=2.5),
                         hovertemplate="日期: %{x|%Y-%m-%d}<br>淨值: %{y:.1f}<extra></extra>",
                     ))
+
+                # Benchmark line
                 if bm_s is not None and not bm_s.empty:
                     fig.add_trace(go.Scatter(
                         x=bm_s.index, y=bm_s.values, mode="lines",
@@ -1441,11 +1591,12 @@ def main() -> None:
                         line=dict(color="#00D4FF", width=2, dash="dot"),
                         hovertemplate="日期: %{x|%Y-%m-%d}<br>淨值: %{y:.1f}<extra></extra>",
                     ))
+
                 fig.update_layout(
-                    height=380, margin=dict(l=0, r=0, t=20, b=20),
+                    height=420, margin=dict(l=0, r=0, t=20, b=20),
                     paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                                xanchor="right", x=1, font=dict(size=12, color="#ddd")),
+                                xanchor="right", x=1, font=dict(size=11, color="#ddd")),
                     xaxis=dict(showgrid=True, gridcolor="#2a2a3a",
                                tickfont=dict(size=12, color="#aaa")),
                     yaxis=dict(showgrid=True, gridcolor="#2a2a3a",

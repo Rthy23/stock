@@ -14,6 +14,7 @@ from datetime import datetime
 from backtest_engine import calc_rebalance
 from ocr_module import ocr_with_gemini, render_manual_correction_form
 import mpf_db
+import mpf_strategy
 
 _MODULE       = "mpf_assistant"
 _MAPPING_PATH = "fund_mapping.json"
@@ -731,6 +732,277 @@ def _render_rebalance_chart(result: dict, target_pct: dict, current_pct: dict) -
 
 
 # ── Main page entry point ──────────────────────────────────────────────────────
+def _render_strategy_tab() -> None:
+    """RS + SMA strategy signals for each fund with dual pie charts."""
+    portfolio = st.session_state.get("mpf_portfolio", [])
+    if not portfolio:
+        st.info("📂 請先在「截圖識別」或「持倉透視」頁籤輸入您的 MPF 持倉，然後回到此頁籤查看策略建議。")
+        return
+
+    if st.button("🔄 分析最新市場訊號", type="primary", key="mpf_run_strategy"):
+        with st.spinner("正在連接市場數據，分析各基金 ETF 代理的 RS + SMA 趨勢…"):
+            result = mpf_strategy.get_strategy_signals(portfolio)
+            st.session_state["mpf_strategy_result"] = result
+
+    result = st.session_state.get("mpf_strategy_result")
+    if not result:
+        st.info("👆 點擊按鈕以分析當前持倉的量化訊號")
+        return
+
+    if result.get("error"):
+        st.error(f"⚠️ 分析失敗：{result['error']}")
+        return
+
+    signals  = result["signals"]
+    mkt_cond = result["market_condition"]
+    def_adv  = result["defensive_advice"]
+
+    # ── Market condition banner ────────────────────────────────────────────
+    mkt_colors = {"bullish": "#00CC44", "bearish": "#FF4B4B", "neutral": "#888"}
+    mkt_labels = {"bullish": "📈 宏觀多頭訊號", "bearish": "📉 宏觀空頭警示", "neutral": "🔄 市場中性"}
+    mkt_color  = mkt_colors.get(mkt_cond, "#888")
+    mkt_label  = mkt_labels.get(mkt_cond, "🔄 市場中性")
+    st.markdown(
+        f"<div style='background:#F0F8FF; border-left:5px solid {mkt_color}; "
+        f"border-radius:6px; padding:12px 18px; margin-bottom:12px;'>"
+        f"<b style='font-size:16px; color:{mkt_color};'>{mkt_label}</b>"
+        f"<span style='color:#555; font-size:13px; margin-left:16px;'>"
+        f"當前防禦配置：{def_adv.get('current_defensive_pct', 0):.1f}%  ·  "
+        f"建議目標：{def_adv.get('suggested_defensive_pct', 0):.1f}%  ·  "
+        f"需轉移：{def_adv.get('shift_amount_pct', 0):.1f}%</span></div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Signal cards per fund ──────────────────────────────────────────────
+    st.markdown("### 📋 各基金訊號明細")
+    for sig in signals:
+        rec   = sig["recommendation"]
+        sma   = sig.get("sma", {})
+        rs    = sig.get("rs", {})
+        color = rec.get("color", "#888")
+        with st.expander(
+            f"{rec['label']}  ·  {sig['fund_name']}  （ETF代理：{sig['etf']}）",
+            expanded=(rec["action"] in ("add", "switch_defensive")),
+        ):
+            sc1, sc2, sc3 = st.columns(3)
+            sc1.markdown(
+                f"**建議操作**  \n"
+                f"<span style='color:{color}; font-size:18px; font-weight:700;'>"
+                f"{rec['label']}</span>",
+                unsafe_allow_html=True,
+            )
+            sc1.caption(f"信心度：{rec.get('confidence', 'low')}")
+            sc2.markdown(
+                f"**SMA 趨勢**  \n"
+                f"趨勢：`{sma.get('trend', 'N/A')}`  \n"
+                f"SMA20：`{sma.get('sma20', 'N/A')}`  \n"
+                f"SMA50：`{sma.get('sma50', 'N/A')}`  \n"
+                f"20日動量：`{sma.get('momentum', 0):.1f}%`"
+            )
+            sc3.markdown(
+                f"**相對強度 (RS)**  \n"
+                f"RS vs SPY：`{rs.get('rs_raw', 'N/A')}`  \n"
+                f"RS SMA20：`{rs.get('rs_sma20', 'N/A')}`  \n"
+                f"RS趨勢：`{rs.get('rs_trend', 'N/A')}`  \n"
+                f"RS訊號：`{rs.get('rs_signal', 'N/A')}`"
+            )
+            st.info(f"💡 {rec['reason']}")
+
+    # ── Dual pie charts: Current vs Suggested ─────────────────────────────
+    st.markdown("---")
+    st.markdown("### 🥧 現有 vs 建議配置比較")
+
+    fund_names = [s["fund_name"] for s in signals]
+    cur_pcts   = [s["pct"] for s in signals]
+    total_pct  = sum(cur_pcts) or 1.0
+    cur_norm   = [p / total_pct * 100 for p in cur_pcts]
+
+    # Build suggested: reduce funds with "reduce"/"switch_defensive" by 20%, add to defensive
+    sug_pcts = list(cur_norm)
+    reduce_indices  = [i for i, s in enumerate(signals)
+                       if s["recommendation"]["action"] in ("reduce", "switch_defensive")]
+    add_indices     = [i for i, s in enumerate(signals)
+                       if s["recommendation"]["action"] == "add"]
+    def_indices     = [i for i, s in enumerate(signals)
+                       if s.get("category", "") in ("固定收益", "保本")]
+
+    released = 0.0
+    for i in reduce_indices:
+        cut      = sug_pcts[i] * 0.20
+        sug_pcts[i] -= cut
+        released += cut
+
+    if released > 0:
+        if def_indices:
+            per_def = released / len(def_indices)
+            for i in def_indices:
+                sug_pcts[i] += per_def
+        elif add_indices:
+            per_add = released / len(add_indices)
+            for i in add_indices:
+                sug_pcts[i] += per_add
+
+    pie_colors = [
+        "#00CC44", "#4DB6E6", "#FFD700", "#FF8C00", "#CC66FF",
+        "#FF6B6B", "#00CCAA", "#FF99CC", "#99CCFF", "#FFCC66",
+    ]
+
+    c1, c2 = st.columns(2)
+    with c1:
+        fig_cur = go.Figure(go.Pie(
+            labels=fund_names, values=cur_norm,
+            hole=0.4, marker_colors=pie_colors[:len(fund_names)],
+            textinfo="label+percent",
+            hovertemplate="%{label}: %{value:.1f}%<extra></extra>",
+        ))
+        fig_cur.update_layout(
+            title="現有配置", height=360,
+            paper_bgcolor="#FFFFFF",
+            margin=dict(t=40, b=20, l=10, r=10),
+            legend=dict(font=dict(size=10)),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_cur, use_container_width=True)
+    with c2:
+        fig_sug = go.Figure(go.Pie(
+            labels=fund_names, values=sug_pcts,
+            hole=0.4, marker_colors=pie_colors[:len(fund_names)],
+            textinfo="label+percent",
+            hovertemplate="%{label}: %{value:.1f}%<extra></extra>",
+        ))
+        fig_sug.update_layout(
+            title="量化建議配置（基於 RS+SMA）", height=360,
+            paper_bgcolor="#FFFFFF",
+            margin=dict(t=40, b=20, l=10, r=10),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_sug, use_container_width=True)
+
+    # ── ETF historical comparison chart ───────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📈 ETF 代理歷史對比（標準化，基準=100）")
+    etf_list = list(dict.fromkeys(
+        [s["etf"] for s in signals if s["etf"] != "N/A"]
+    ))
+    if etf_list:
+        period_yr = st.selectbox("選擇時間段", [1, 2, 3], index=0,
+                                 key="mpf_etf_period", format_func=lambda x: f"{x}年")
+        with st.spinner("加載 ETF 歷史數據…"):
+            hist_df = mpf_strategy.get_etf_vs_spy_history(etf_list, years=period_yr)
+        if not hist_df.empty:
+            fig_hist = go.Figure()
+            _hist_colors = ["#00CC44","#4DB6E6","#FFD700","#FF8C00","#CC66FF",
+                            "#FF6B6B","#00CCAA","#FF99CC"]
+            for hi, col in enumerate(hist_df.columns):
+                lw = 2.5 if col == "SPY" else 1.5
+                dash = "dot" if col == "SPY" else "solid"
+                fig_hist.add_trace(go.Scatter(
+                    x=hist_df.index, y=hist_df[col].values,
+                    mode="lines", name=col,
+                    line=dict(color=_hist_colors[hi % len(_hist_colors)], width=lw, dash=dash),
+                    hovertemplate=f"{col} %{{x|%Y-%m-%d}}: %{{y:.1f}}<extra></extra>",
+                ))
+            fig_hist.update_layout(
+                height=380, paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                            xanchor="right", x=1, font=dict(size=11, color="#ddd")),
+                xaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                           tickfont=dict(size=11, color="#aaa")),
+                yaxis=dict(showgrid=True, gridcolor="#2a2a3a",
+                           tickfont=dict(size=11, color="#aaa"),
+                           title=dict(text="標準化淨值（初始=100）",
+                                      font=dict(size=11, color="#aaa"))),
+                margin=dict(l=0, r=0, t=20, b=20),
+                font=dict(size=11, color="#ddd"),
+            )
+            st.plotly_chart(fig_hist, use_container_width=True)
+        else:
+            st.warning("⚠️ 無法獲取 ETF 歷史數據")
+    else:
+        st.info("持倉中無有效 ETF 代理，無法顯示歷史對比")
+
+
+def _render_ai_report_tab() -> None:
+    """Gemini AI investment analysis report for MPF portfolio."""
+    try:
+        from ocr_module import generate_quant_report
+    except ImportError:
+        st.error("⚠️ AI 報告模組無法載入")
+        return
+
+    portfolio = st.session_state.get("mpf_portfolio", [])
+    if not portfolio:
+        st.info("📂 請先輸入您的 MPF 持倉，再生成 AI 分析報告。")
+        return
+
+    st.markdown("### 🤖 Gemini AI 智能分析報告")
+    st.caption("根據您的 MPF 持倉配置與當前宏觀環境，由 Gemini AI 生成個性化投資建議")
+
+    strategy_result = st.session_state.get("mpf_strategy_result")
+
+    if st.button("📝 生成 AI 分析報告", type="primary", key="mpf_ai_report_btn"):
+        with st.spinner("Gemini AI 正在分析您的 MPF 持倉…（約15-30秒）"):
+            try:
+                total_mv  = sum(p.get("market_value_hkd", 0) or 0 for p in portfolio)
+                total_pnl = sum(p.get("pnl_hkd", 0) or 0 for p in portfolio)
+                pnl_pct   = (total_pnl / (total_mv - total_pnl) * 100) if (total_mv - total_pnl) > 0 else 0
+
+                # Build prompt about holdings
+                holdings_summary = "\n".join(
+                    f"- {p['fund_name']} ({p.get('etf','N/A')}): "
+                    f"{p.get('pct',0):.1f}% 配置, "
+                    f"市值 HKD {p.get('market_value_hkd',0):,.0f}, "
+                    f"損益 HKD {p.get('pnl_hkd',0):+,.0f}"
+                    for p in portfolio
+                )
+
+                strategy_summary = ""
+                if strategy_result and not strategy_result.get("error"):
+                    sigs = strategy_result["signals"]
+                    strategy_summary = "\n量化訊號摘要：\n" + "\n".join(
+                        f"- {s['fund_name']}: {s['recommendation']['label']} "
+                        f"（RS {s['rs'].get('rs_signal','N/A')}, SMA趨勢 {s['sma'].get('trend','N/A')}）"
+                        for s in sigs
+                    )
+
+                prompt = f"""
+你是一位專業的香港強積金（MPF）投資顧問，請用繁體中文分析以下持倉並給出具體建議：
+
+## 持倉摘要
+總市值：HKD {total_mv:,.0f}
+總損益：HKD {total_pnl:+,.0f}（{pnl_pct:+.1f}%）
+
+## 各基金配置
+{holdings_summary}
+{strategy_summary}
+
+請提供：
+1. **整體配置評估**（多元化程度、風險集中度）
+2. **各基金具體建議**（加碼/持平/減持，附理由）
+3. **宏觀市場風險因素**（2026年值得關注的事件）
+4. **行動計劃**（本月最優先的1-2個調整動作）
+5. **長期優化建議**（3-5年視角下的理想配置方向）
+
+請保持簡潔、實用，避免空泛的投資警告。
+"""
+                report = generate_quant_report(prompt)
+                st.session_state["mpf_ai_report"] = report
+            except Exception as _e:
+                st.error(f"⚠️ AI 報告生成失敗：{_e}")
+
+    report = st.session_state.get("mpf_ai_report")
+    if report:
+        st.markdown("---")
+        st.markdown(report)
+        st.download_button(
+            "⬇️ 下載報告 (.txt)",
+            data=report,
+            file_name=f"MPF_AI_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+            mime="text/plain",
+            key="mpf_ai_dl",
+        )
+
+
 def render_mpf_page() -> None:
     """Full MPF 智投診斷室 page."""
     try:
@@ -748,8 +1020,8 @@ def render_mpf_page() -> None:
         render_market_alert()
         st.markdown("---")
 
-        tab_ocr, tab_portfolio, tab_rebalance = st.tabs(
-            ["📸 截圖識別", "📊 持倉透視", "⚖️ 再平衡建議"]
+        tab_ocr, tab_portfolio, tab_rebalance, tab_strategy, tab_ai = st.tabs(
+            ["📸 截圖識別", "📊 持倉透視", "⚖️ 再平衡建議", "🎯 智投建議", "🤖 AI 分析報告"]
         )
 
         with tab_ocr:
@@ -762,6 +1034,12 @@ def render_mpf_page() -> None:
             render_rebalance_section(
                 monthly_budget=st.session_state.get("mpf_monthly_budget", 2400.0)
             )
+
+        with tab_strategy:
+            _render_strategy_tab()
+
+        with tab_ai:
+            _render_ai_report_tab()
 
     except Exception as e:
         st.error(f"❌ MPF 智投頁面異常：{e}")

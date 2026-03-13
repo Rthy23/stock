@@ -439,9 +439,17 @@ def run_backtest(
         drawdown_periods = analyze_drawdown_periods(portfolio_series)
         contribution     = calc_contribution(pf_prices)
 
+        # ── Per-ticker normalized series (base=100) for individual-line chart ──
+        individual_series: dict[str, pd.Series] = {}
+        for t in pf_tickers:
+            col = prices[t].dropna()
+            if len(col) >= 5:
+                individual_series[t] = (col / col.iloc[0] * 100).rename(t)
+
         return {
             "portfolio_series":   portfolio_series,
             "benchmark_series":   bm_series,
+            "individual_series":  individual_series,
             "portfolio_metrics":  pf_metrics,
             "benchmark_metrics":  bm_metrics,
             "alpha":              alpha,
