@@ -49,6 +49,7 @@ from notifier import (
     run_all_checks, get_current_prices,
     load_notification_log, send_telegram_notification,
 )
+from user_config import load_order, save_order, get_section_labels, SECTION_META
 
 _MODULE = "main"
 
@@ -417,6 +418,41 @@ def main() -> None:
                     "   TELEGRAM_BOT_TOKEN\n"
                     "   TELEGRAM_USER_ID")
 
+    # ── Module order customiser ───────────────────────────────────────────────
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("📐 個股診斷模組排序", expanded=False):
+        st.caption("拖曳或修改「顯示順序」欄位的數字（1 最先顯示），再點擊「儲存排序」。")
+        _sec_labels = get_section_labels()
+        _cur_order  = load_order()
+
+        _cfg_df = pd.DataFrame({
+            "模組名稱": [_sec_labels[k] for k in _cur_order],
+            "顯示順序": list(range(1, len(_cur_order) + 1)),
+            "_key":     _cur_order,
+        })
+        _edited_cfg = st.data_editor(
+            _cfg_df[["模組名稱", "顯示順序"]],
+            hide_index=True,
+            use_container_width=True,
+            key="module_order_editor",
+            column_config={
+                "模組名稱": st.column_config.TextColumn("模組", disabled=True),
+                "顯示順序": st.column_config.NumberColumn(
+                    "順序", min_value=1, max_value=len(_cur_order),
+                    step=1, help="輸入數字決定顯示位置（1 = 最頂部）",
+                ),
+            },
+        )
+        if st.button("💾 儲存排序", key="save_module_order_btn",
+                     use_container_width=True):
+            _merged = _edited_cfg.copy()
+            _merged["_key"] = _cur_order
+            _sorted_cfg = _merged.sort_values("顯示順序").reset_index(drop=True)
+            _new_order  = _sorted_cfg["_key"].tolist()
+            save_order(_new_order)
+            st.success("✅ 排序已儲存！下次載入頁面生效。")
+            st.rerun()
+
     # ── Benchmark monitor ─────────────────────────────────────────────────────
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📊 大盤監測儀")
@@ -763,141 +799,7 @@ def main() -> None:
             m6.metric("EPS",      f"${stock_info['eps']:.2f}" if stock_info["eps"] else "N/A")
             m7.metric("Beta",     f"{stock_info['beta']:.2f}" if stock_info["beta"] else "N/A")
 
-            # ── 歷史表現對比分析（多時間區間）─────────────────────────────────
-            st.markdown("---")
-            st.markdown("### 📅 歷史表現對比分析")
-
-            # ── Period selector ────────────────────────────────────────────
-            _PERIOD_MAP = {"6M": "6mo", "1Y": "1y", "3Y": "3y", "5Y": "5y", "10Y": "10y"}
-            _sel_period = st.radio(
-                "選擇時間區間",
-                list(_PERIOD_MAP.keys()),
-                index=1,
-                horizontal=True,
-                key=f"hist_compare_period_{ticker}",
-            )
-            _yf_period  = _PERIOD_MAP[_sel_period]
-            _bm_ticker_c = st.session_state.get("benchmark", "VOO")
-
-            with st.spinner(f"載入 {_sel_period} 歷史數據…"):
-                _comp_hist = get_historical_data(ticker, _yf_period)
-                _bm_data_c = get_market_benchmark(_bm_ticker_c, _yf_period)
-
-            if _comp_hist is not None and not _comp_hist.empty:
-                _cc = _comp_hist["Close"].dropna()
-                _stock_ret = float((_cc.iloc[-1] / _cc.iloc[0] - 1) * 100)
-                _stock_hi  = float(_comp_hist["High"].max())
-                _stock_lo  = float(_comp_hist["Low"].min())
-                _stock_vol = float(_cc.pct_change().dropna().std() * (252 ** 0.5) * 100)
-                _dd_roll   = (_cc - _cc.cummax()) / _cc.cummax() * 100
-                _stock_dd  = float(_dd_roll.min())
-
-                _bm_hist_c = _bm_data_c.get("hist")
-                _bm_ret_c  = None
-                if _bm_hist_c is not None and not _bm_hist_c.empty:
-                    _bmc = _bm_hist_c["Close"].dropna()
-                    _bm_ret_c = float((_bmc.iloc[-1] / _bmc.iloc[0] - 1) * 100)
-
-                # ── Summary metric cards ───────────────────────────────────
-                _rc = "#00FF7F" if _stock_ret >= 0 else "#FF4B4B"
-                _rs = f"+{_stock_ret:.2f}%" if _stock_ret >= 0 else f"{_stock_ret:.2f}%"
-
-                _ma1, _ma2, _ma3, _ma4, _ma5 = st.columns(5)
-                _ma1.metric(f"區間報酬 ({_sel_period})", _rs,
-                            delta=_rs, delta_color="normal")
-                if _bm_ret_c is not None:
-                    _alpha_c = _stock_ret - _bm_ret_c
-                    _bm_sign = f"+{_bm_ret_c:.2f}%" if _bm_ret_c >= 0 else f"{_bm_ret_c:.2f}%"
-                    _al_sign = f"+{_alpha_c:.2f}%" if _alpha_c >= 0 else f"{_alpha_c:.2f}%"
-                    _ma2.metric(f"{_bm_ticker_c} 基準", _bm_sign,
-                                delta=_bm_sign, delta_color="normal")
-                    _ma3.metric("超額報酬 Alpha", _al_sign,
-                                delta=_al_sign, delta_color="normal")
-                else:
-                    _ma2.metric(f"{_bm_ticker_c} 基準", "N/A")
-                    _ma3.metric("超額報酬 Alpha", "N/A")
-                _ma4.metric("最大回撤", f"{_stock_dd:.2f}%")
-                _ma5.metric("年化波動率", f"{_stock_vol:.1f}%")
-
-                # ── Normalized cumulative return chart (stock vs benchmark) ─
-                _norm_df = pd.DataFrame({"日期": _cc.index,
-                                         ticker: (_cc / _cc.iloc[0] * 100).values})
-                if _bm_hist_c is not None and not _bm_hist_c.empty:
-                    _bmc2 = _bm_hist_c["Close"].dropna()
-                    _bmc2_aligned = _bmc2.reindex(_cc.index, method="ffill").dropna()
-                    if not _bmc2_aligned.empty:
-                        _norm_df[_bm_ticker_c] = (
-                            _bmc2_aligned / _bmc2_aligned.iloc[0] * 100
-                        ).values[: len(_norm_df)]
-
-                _fig_norm = go.Figure()
-                _line_colors = {"stock": "#1F6FEB", "bm": "#FF9500"}
-                _fig_norm.add_trace(go.Scatter(
-                    x=_norm_df["日期"], y=_norm_df[ticker],
-                    mode="lines", name=ticker,
-                    line=dict(color="#1F6FEB", width=2.5),
-                    hovertemplate=f"{ticker}: %{{y:.1f}}<extra></extra>",
-                ))
-                if _bm_ticker_c in _norm_df.columns:
-                    _fig_norm.add_trace(go.Scatter(
-                        x=_norm_df["日期"], y=_norm_df[_bm_ticker_c],
-                        mode="lines", name=_bm_ticker_c,
-                        line=dict(color="#FF9500", width=2, dash="dot"),
-                        hovertemplate=f"{_bm_ticker_c}: %{{y:.1f}}<extra></extra>",
-                    ))
-                _fig_norm.add_hline(y=100, line_dash="dash",
-                                    line_color="#444", line_width=1)
-                _fig_norm.update_layout(
-                    title=f"{ticker} vs {_bm_ticker_c} — 累計報酬率對比（{_sel_period}，以 100 為基準）",
-                    template="plotly_dark",
-                    paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
-                    height=320, margin=dict(t=45, b=30, l=60, r=20),
-                    hovermode="x unified", legend=dict(x=0.01, y=0.99),
-                    yaxis_title="累計報酬率（基準=100）",
-                )
-                st.plotly_chart(_fig_norm, use_container_width=True,
-                                key=f"norm_chart_{ticker}_{_sel_period}")
-
-                # ── Sub-period breakdown tabs ─────────────────────────────
-                st.markdown("**區間細分表現**")
-                _sub_periods = {"1 週": 5, "1 個月": 21, "3 個月": 63}
-                _sub_tabs = st.tabs(list(_sub_periods.keys()))
-                for _stab, (_slbl, _sdays) in zip(_sub_tabs, _sub_periods.items()):
-                    with _stab:
-                        _sl = _comp_hist.tail(_sdays)
-                        if len(_sl) < 2:
-                            st.caption("資料不足，無法計算此區間。")
-                            continue
-                        _so = float(_sl["Close"].iloc[0])
-                        _sc2 = float(_sl["Close"].iloc[-1])
-                        _sh = float(_sl["High"].max())
-                        _slo2 = float(_sl["Low"].min())
-                        _sr = (_sc2 - _so) / _so * 100
-                        _sv = float(_sl["Volume"].mean())
-                        _scolor = "#00FF7F" if _sr >= 0 else "#FF4B4B"
-                        _ssign = f"+{_sr:.2f}%" if _sr >= 0 else f"{_sr:.2f}%"
-                        _sc1, _sc2c, _sc3, _sc4 = st.columns(4)
-                        _sc1.metric(f"報酬（{_slbl}）", _ssign,
-                                    delta=_ssign, delta_color="normal")
-                        _sc2c.metric("區間最高", f"${_sh:.2f}")
-                        _sc3.metric("區間最低", f"${_slo2:.2f}")
-                        _sc4.metric("均日成交量", f"{_sv:,.0f}")
-                        _sfig = px.line(
-                            _sl.reset_index(), x=_sl.index, y="Close",
-                            title=f"{ticker} — {_slbl}收盤走勢",
-                            labels={"Close": "收盤價 (USD)", "x": "日期"},
-                            color_discrete_sequence=[_scolor],
-                        )
-                        _sfig.update_layout(
-                            template="plotly_dark",
-                            paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
-                            height=230, margin=dict(t=38, b=30, l=60, r=20),
-                            hovermode="x unified",
-                        )
-                        st.plotly_chart(_sfig, use_container_width=True,
-                                        key=f"sub_chart_{ticker}_{_slbl}_{_sel_period}")
-            else:
-                st.warning(f"無法載入 {ticker} 的 {_sel_period} 歷史數據。")
+            # ── [Moved] 歷史表現對比分析 now rendered via dynamic section loop below ─
 
             # ── 決策速查表 ─────────────────────────────────────────────────────
             st.markdown("---")
@@ -1426,232 +1328,313 @@ def main() -> None:
             except Exception:
                 st.caption("⏳ 分析師數據暫時不可用，請稍後再試。")
 
-            # ── Section 8: 7-Factor Multi-Factor Analysis ───────────────────
-            st.markdown("---")
-            st.markdown("### 📊 7-Factor 多因子分析系統")
-            _f7_key = f"factor7_{ticker}"
-            _f7_data_key = f"factor7_data_{ticker}"
+            # ══════════════════════════════════════════════════════════════
+            # DYNAMIC SECTION RENDERING — order controlled by user_config.json
+            # ══════════════════════════════════════════════════════════════
 
-            if st.button("🔬 計算七大因子", key=f"f7_btn_{ticker}",
-                         type="primary", use_container_width=True):
-                with st.spinner(f"正在計算 {ticker} 七大因子…"):
-                    _fd = get_factor_data(ticker)
-                    _f7 = calculate_seven_factors(stock_info, hist, _fd)
-                st.session_state[_f7_key]      = _f7
-                st.session_state[_f7_data_key] = _fd
+            # ── Nested render functions (closure over ticker/hist/stock_info/bm) ─
 
-            _f7 = st.session_state.get(_f7_key)
-            if _f7:
-                _comp   = _f7.get("composite", 0)
-                _signal = _f7.get("signal", "HOLD")
-                _signal_colors = {
-                    "STRONG BUY":  ("#00FF7F", "#0D2E1A"),
-                    "BUY":         ("#7CFC00", "#132A13"),
-                    "HOLD":        ("#FFD700", "#2D2500"),
-                    "SELL":        ("#FF8C00", "#2D1800"),
-                    "STRONG SELL": ("#FF4B4B", "#2D1B1B"),
-                }
-                _sc, _sbg = _signal_colors.get(_signal, ("#FFD700", "#2D2500"))
-
-                # ── Header card ──────────────────────────────────────────
-                _name_disp = stock_info.get("name", ticker)
-                st.markdown(
-                    f"<div style='background:#161B22; border:1px solid #30363D; "
-                    f"border-radius:12px; padding:20px 28px; margin-bottom:16px;'>"
-                    f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
-                    f"<div>"
-                    f"<div style='font-size:24px; font-weight:700; color:#E6EDF3;'>{ticker}</div>"
-                    f"<div style='color:{_sc}; font-size:18px; font-weight:700; margin-top:4px;'>"
-                    f"{_signal}</div>"
-                    f"<div style='color:#8B949E; font-size:12px; margin-top:2px;'>"
-                    f"7-Factor Composite Score</div>"
-                    f"</div>"
-                    f"<div style='text-align:right;'>"
-                    f"<div style='font-size:48px; font-weight:700; color:{_sc};'>"
-                    f"{_comp:+.2f}</div>"
-                    f"<div style='color:#8B949E; font-size:12px;'>Range: -5 to +5</div>"
-                    f"<div style='width:180px; height:6px; background:#21262D; "
-                    f"border-radius:3px; margin-top:6px; overflow:hidden;'>"
-                    f"<div style='width:{max(0, min(100, (_comp+5)/10*100)):.1f}%; "
-                    f"height:100%; background:{_sc}; border-radius:3px;'></div>"
-                    f"</div>"
-                    f"</div></div></div>",
-                    unsafe_allow_html=True,
+            def _section_comparison():
+                st.markdown("---")
+                st.markdown("### 📅 歷史表現對比分析")
+                _PERIOD_MAP = {"6M": "6mo", "1Y": "1y", "3Y": "3y", "5Y": "5y", "10Y": "10y"}
+                _sel_period = st.radio(
+                    "選擇時間區間", list(_PERIOD_MAP.keys()),
+                    index=1, horizontal=True,
+                    key=f"hist_compare_period_{ticker}",
                 )
+                _yf_period   = _PERIOD_MAP[_sel_period]
+                _bm_ticker_c = st.session_state.get("benchmark", "VOO")
+                with st.spinner(f"載入 {_sel_period} 歷史數據…"):
+                    _comp_hist = get_historical_data(ticker, _yf_period)
+                    _bm_data_c = get_market_benchmark(_bm_ticker_c, _yf_period)
+                if _comp_hist is not None and not _comp_hist.empty:
+                    _cc = _comp_hist["Close"].dropna()
+                    _stock_ret = float((_cc.iloc[-1] / _cc.iloc[0] - 1) * 100)
+                    _stock_vol = float(_cc.pct_change().dropna().std() * (252 ** 0.5) * 100)
+                    _dd_roll   = (_cc - _cc.cummax()) / _cc.cummax() * 100
+                    _stock_dd  = float(_dd_roll.min())
+                    _bm_hist_c = _bm_data_c.get("hist")
+                    _bm_ret_c  = None
+                    if _bm_hist_c is not None and not _bm_hist_c.empty:
+                        _bmc = _bm_hist_c["Close"].dropna()
+                        _bm_ret_c = float((_bmc.iloc[-1] / _bmc.iloc[0] - 1) * 100)
+                    _rs = f"+{_stock_ret:.2f}%" if _stock_ret >= 0 else f"{_stock_ret:.2f}%"
+                    _ma1, _ma2, _ma3, _ma4, _ma5 = st.columns(5)
+                    _ma1.metric(f"區間報酬 ({_sel_period})", _rs, delta=_rs, delta_color="normal")
+                    if _bm_ret_c is not None:
+                        _alpha_c = _stock_ret - _bm_ret_c
+                        _bm_sign = f"+{_bm_ret_c:.2f}%" if _bm_ret_c >= 0 else f"{_bm_ret_c:.2f}%"
+                        _al_sign = f"+{_alpha_c:.2f}%" if _alpha_c >= 0 else f"{_alpha_c:.2f}%"
+                        _ma2.metric(f"{_bm_ticker_c} 基準", _bm_sign, delta=_bm_sign, delta_color="normal")
+                        _ma3.metric("超額報酬 Alpha", _al_sign, delta=_al_sign, delta_color="normal")
+                    else:
+                        _ma2.metric(f"{_bm_ticker_c} 基準", "N/A")
+                        _ma3.metric("超額報酬 Alpha", "N/A")
+                    _ma4.metric("最大回撤", f"{_stock_dd:.2f}%")
+                    _ma5.metric("年化波動率", f"{_stock_vol:.1f}%")
+                    _norm_df = pd.DataFrame({"日期": _cc.index,
+                                             ticker: (_cc / _cc.iloc[0] * 100).values})
+                    if _bm_hist_c is not None and not _bm_hist_c.empty:
+                        _bmc2 = _bm_hist_c["Close"].dropna()
+                        _bmc2a = _bmc2.reindex(_cc.index, method="ffill").dropna()
+                        if not _bmc2a.empty:
+                            _norm_df[_bm_ticker_c] = (
+                                _bmc2a / _bmc2a.iloc[0] * 100
+                            ).values[: len(_norm_df)]
+                    _fig_norm = go.Figure()
+                    _fig_norm.add_trace(go.Scatter(
+                        x=_norm_df["日期"], y=_norm_df[ticker], mode="lines", name=ticker,
+                        line=dict(color="#1F6FEB", width=2.5),
+                        hovertemplate=f"{ticker}: %{{y:.1f}}<extra></extra>",
+                    ))
+                    if _bm_ticker_c in _norm_df.columns:
+                        _fig_norm.add_trace(go.Scatter(
+                            x=_norm_df["日期"], y=_norm_df[_bm_ticker_c],
+                            mode="lines", name=_bm_ticker_c,
+                            line=dict(color="#FF9500", width=2, dash="dot"),
+                            hovertemplate=f"{_bm_ticker_c}: %{{y:.1f}}<extra></extra>",
+                        ))
+                    _fig_norm.add_hline(y=100, line_dash="dash", line_color="#444", line_width=1)
+                    _fig_norm.update_layout(
+                        title=f"{ticker} vs {_bm_ticker_c} — 累計報酬率對比（{_sel_period}，以 100 為基準）",
+                        template="plotly_dark", paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
+                        height=320, margin=dict(t=45, b=30, l=60, r=20),
+                        hovermode="x unified", legend=dict(x=0.01, y=0.99),
+                        yaxis_title="累計報酬率（基準=100）",
+                    )
+                    st.plotly_chart(_fig_norm, use_container_width=True,
+                                    key=f"norm_chart_{ticker}_{_sel_period}")
+                    st.markdown("**區間細分表現**")
+                    _sub_periods = {"1 週": 5, "1 個月": 21, "3 個月": 63}
+                    _sub_tabs = st.tabs(list(_sub_periods.keys()))
+                    for _stab, (_slbl, _sdays) in zip(_sub_tabs, _sub_periods.items()):
+                        with _stab:
+                            _sl = _comp_hist.tail(_sdays)
+                            if len(_sl) < 2:
+                                st.caption("資料不足，無法計算此區間。")
+                                continue
+                            _so  = float(_sl["Close"].iloc[0])
+                            _sc2 = float(_sl["Close"].iloc[-1])
+                            _sh  = float(_sl["High"].max())
+                            _slo2 = float(_sl["Low"].min())
+                            _sr  = (_sc2 - _so) / _so * 100
+                            _sv  = float(_sl["Volume"].mean())
+                            _scolor = "#00FF7F" if _sr >= 0 else "#FF4B4B"
+                            _ssign  = f"+{_sr:.2f}%" if _sr >= 0 else f"{_sr:.2f}%"
+                            _sc1, _sc2c, _sc3, _sc4 = st.columns(4)
+                            _sc1.metric(f"報酬（{_slbl}）", _ssign, delta=_ssign, delta_color="normal")
+                            _sc2c.metric("區間最高", f"${_sh:.2f}")
+                            _sc3.metric("區間最低", f"${_slo2:.2f}")
+                            _sc4.metric("均日成交量", f"{_sv:,.0f}")
+                            _sfig = px.line(
+                                _sl.reset_index(), x=_sl.index, y="Close",
+                                title=f"{ticker} — {_slbl}收盤走勢",
+                                labels={"Close": "收盤價 (USD)", "x": "日期"},
+                                color_discrete_sequence=[_scolor],
+                            )
+                            _sfig.update_layout(
+                                template="plotly_dark",
+                                paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
+                                height=230, margin=dict(t=38, b=30, l=60, r=20),
+                                hovermode="x unified",
+                            )
+                            st.plotly_chart(_sfig, use_container_width=True,
+                                            key=f"sub_chart_{ticker}_{_slbl}_{_sel_period}")
+                else:
+                    st.warning(f"無法載入 {ticker} 的 {_sel_period} 歷史數據。")
 
-                # ── Radar chart + Score bars ──────────────────────────────
-                _fcol1, _fcol2 = st.columns([1, 1])
+            def _section_factor_system():
+                st.markdown("---")
+                st.markdown("### 📊 7-Factor 多因子分析系統")
+                _f7_key      = f"factor7_{ticker}"
+                _f7_data_key = f"factor7_data_{ticker}"
+                if st.button("🔬 計算七大因子", key=f"f7_btn_{ticker}",
+                             type="primary", use_container_width=True):
+                    with st.spinner(f"正在計算 {ticker} 七大因子…"):
+                        _fd = get_factor_data(ticker)
+                        _f7 = calculate_seven_factors(stock_info, hist, _fd)
+                    st.session_state[_f7_key]      = _f7
+                    st.session_state[_f7_data_key] = _fd
+                _f7 = st.session_state.get(_f7_key)
+                if _f7:
+                    _comp   = _f7.get("composite", 0)
+                    _signal = _f7.get("signal", "HOLD")
+                    _sig_colors = {
+                        "STRONG BUY":  "#00FF7F", "BUY":  "#7CFC00",
+                        "HOLD":        "#FFD700", "SELL": "#FF8C00",
+                        "STRONG SELL": "#FF4B4B",
+                    }
+                    _sc = _sig_colors.get(_signal, "#FFD700")
+                    st.markdown(
+                        f"<div style='background:#161B22; border:1px solid #30363D; "
+                        f"border-radius:12px; padding:20px 28px; margin-bottom:16px;'>"
+                        f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
+                        f"<div>"
+                        f"<div style='font-size:24px; font-weight:700; color:#E6EDF3;'>{ticker}</div>"
+                        f"<div style='color:{_sc}; font-size:18px; font-weight:700; margin-top:4px;'>{_signal}</div>"
+                        f"<div style='color:#8B949E; font-size:12px; margin-top:2px;'>7-Factor Composite Score</div>"
+                        f"</div>"
+                        f"<div style='text-align:right;'>"
+                        f"<div style='font-size:48px; font-weight:700; color:{_sc};'>{_comp:+.2f}</div>"
+                        f"<div style='color:#8B949E; font-size:12px;'>Range: -5 to +5</div>"
+                        f"<div style='width:180px; height:6px; background:#21262D; "
+                        f"border-radius:3px; margin-top:6px; overflow:hidden;'>"
+                        f"<div style='width:{max(0,min(100,(_comp+5)/10*100)):.1f}%; "
+                        f"height:100%; background:{_sc}; border-radius:3px;'></div>"
+                        f"</div></div></div></div>",
+                        unsafe_allow_html=True,
+                    )
+                    _fcol1, _fcol2 = st.columns([1, 1])
+                    with _fcol1:
+                        st.markdown("**Factor Exposure Radar 因子雷達圖**")
+                        st.plotly_chart(plot_factor_radar(_f7, ticker),
+                                        use_container_width=True, key=f"f7_radar_{ticker}")
+                    with _fcol2:
+                        st.markdown("**Group Scores 因子組評分**")
+                        for _fk in ["Momentum","Value","Quality","Growth","Volatility","Sentiment","Macro"]:
+                            _fg  = _f7.get(_fk, {})
+                            _flbl = _fg.get("label", _fk)
+                            _fs  = _fg.get("score", 0.0)
+                            _fc  = "#00FF7F" if _fs >= 0 else "#FF4B4B"
+                            _bwp = (_fs / 5) * 50
+                            _bl  = "50%" if _fs >= 0 else f"{50+_bwp:.1f}%"
+                            _bw  = f"{_bwp:.1f}%" if _fs >= 0 else f"{-_bwp:.1f}%"
+                            st.markdown(
+                                f"<div style='margin-bottom:10px;'>"
+                                f"<div style='display:flex;justify-content:space-between;"
+                                f"align-items:center;margin-bottom:3px;'>"
+                                f"<span style='color:#C9D1D9;font-size:13px;'>{_flbl}</span>"
+                                f"<span style='color:{_fc};font-weight:700;font-size:13px;'>{_fs:+.2f}</span>"
+                                f"</div>"
+                                f"<div style='position:relative;height:8px;background:#21262D;"
+                                f"border-radius:4px;overflow:hidden;'>"
+                                f"<div style='position:absolute;left:50%;height:100%;width:1px;background:#444;'></div>"
+                                f"<div style='position:absolute;left:{_bl};width:{_bw};height:100%;"
+                                f"background:{_fc};border-radius:4px;'></div>"
+                                f"</div></div>",
+                                unsafe_allow_html=True,
+                            )
+                    st.markdown("---")
 
-                with _fcol1:
-                    st.markdown("**Factor Exposure Radar 因子雷達圖**")
-                    _radar_fig = plot_factor_radar(_f7, ticker)
-                    st.plotly_chart(_radar_fig, use_container_width=True,
-                                    key=f"f7_radar_{ticker}")
-
-                with _fcol2:
-                    st.markdown("**Group Scores 因子組評分**")
-                    _factor_order = ["Momentum", "Value", "Quality", "Growth",
-                                     "Volatility", "Sentiment", "Macro"]
-                    for _fk in _factor_order:
-                        _fg   = _f7.get(_fk, {})
-                        _flbl = _fg.get("label", _fk)
-                        _fs   = _fg.get("score", 0.0)
-                        _fc   = "#00FF7F" if _fs >= 0 else "#FF4B4B"
-                        # bar width: score/5 → 50% of half-bar; 0→50%, +5→100%, -5→0%
-                        _bar_w_pct = (_fs / 5) * 50   # -50% to +50%
-                        if _fs >= 0:
-                            _bar_left = "50%"
-                            _bar_w_css = f"{_bar_w_pct:.1f}%"
-                        else:
-                            _bar_left = f"{50 + _bar_w_pct:.1f}%"
-                            _bar_w_css = f"{-_bar_w_pct:.1f}%"
+                    def _ftbl(factor_key):
+                        fg  = _f7.get(factor_key, {})
+                        fs  = fg.get("score", 0.0)
+                        fc  = "#00FF7F" if fs >= 0 else "#FF4B4B"
+                        lbl = fg.get("label", factor_key)
                         st.markdown(
-                            f"<div style='margin-bottom:10px;'>"
-                            f"<div style='display:flex; justify-content:space-between; "
-                            f"align-items:center; margin-bottom:3px;'>"
-                            f"<span style='color:#C9D1D9; font-size:13px;'>{_flbl}</span>"
-                            f"<span style='color:{_fc}; font-weight:700; font-size:13px;'>"
-                            f"{_fs:+.2f}</span>"
-                            f"</div>"
-                            f"<div style='position:relative; height:8px; background:#21262D; "
-                            f"border-radius:4px; overflow:hidden;'>"
-                            f"<div style='position:absolute; left:50%; height:100%; "
-                            f"width:1px; background:#444;'></div>"
-                            f"<div style='position:absolute; left:{_bar_left}; "
-                            f"width:{_bar_w_css}; height:100%; background:{_fc}; "
-                            f"border-radius:4px;'></div>"
-                            f"</div></div>",
+                            f"<div style='display:flex;justify-content:space-between;"
+                            f"align-items:baseline;margin-bottom:6px;'>"
+                            f"<span style='font-weight:700;font-size:15px;color:#E6EDF3;'>{lbl}</span>"
+                            f"<span style='font-size:18px;font-weight:700;color:{fc};'>{fs:+.2f}</span>"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                        tbl = (
+                            "<table style='width:100%;border-collapse:collapse;font-size:12px;'>"
+                            "<thead><tr style='color:#8B949E;border-bottom:1px solid #30363D;'>"
+                            "<th style='text-align:left;padding:4px 6px;'>FACTOR 因子</th>"
+                            "<th style='text-align:right;padding:4px 6px;'>VALUE 數值</th>"
+                            "<th style='text-align:right;padding:4px 6px;'>SCORE 評分</th>"
+                            "</tr></thead><tbody>"
+                        )
+                        for itm in fg.get("items", []):
+                            sc   = itm.get("score", 0.0)
+                            sc_c = "#00FF7F" if sc > 0 else ("#FF4B4B" if sc < 0 else "#8B949E")
+                            tbl += (
+                                f"<tr style='border-bottom:1px solid #21262D;'>"
+                                f"<td style='padding:5px 6px;color:#C9D1D9;'>{itm['name']}</td>"
+                                f"<td style='padding:5px 6px;text-align:right;color:#8B949E;'>"
+                                f"{itm['value_str']}</td>"
+                                f"<td style='padding:5px 6px;text-align:right;"
+                                f"font-weight:700;color:{sc_c};'>{sc:+.1f}</td>"
+                                f"</tr>"
+                            )
+                        tbl += "</tbody></table>"
+                        st.markdown(
+                            f"<div style='background:#161B22;border:1px solid #21262D;"
+                            f"border-radius:8px;padding:12px 14px;margin-bottom:12px;'>{tbl}</div>",
                             unsafe_allow_html=True,
                         )
 
-                # ── Factor detail tables ──────────────────────────────────
+                    _r1c1, _r1c2, _r1c3 = st.columns(3)
+                    with _r1c1: _ftbl("Momentum")
+                    with _r1c2: _ftbl("Value")
+                    with _r1c3: _ftbl("Quality")
+                    _r2c1, _r2c2, _r2c3 = st.columns(3)
+                    with _r2c1: _ftbl("Growth")
+                    with _r2c2: _ftbl("Volatility")
+                    with _r2c3: _ftbl("Sentiment")
+                    _ftbl("Macro")
+
+                    st.markdown("---")
+                    st.markdown("**🤖 AI 量化因子報告**")
+                    _f7ai_key = _get_gemini_key()
+                    if _f7ai_key:
+                        if st.button("✨ 生成 AI 因子分析報告",
+                                     key=f"f7_ai_btn_{ticker}", type="primary"):
+                            with st.spinner("Gemini AI 正在解讀七大因子…"):
+                                _f7_prompt = build_factor_prompt(
+                                    ticker, stock_info.get("name", ticker), _f7)
+                                try:
+                                    _f7_ai_txt = call_gemini_cached(_f7_prompt, _f7ai_key)
+                                except Exception as _f7e:
+                                    _f7_ai_txt = ("__QUOTA__" if is_quota_error(_f7e)
+                                                  else f"❌ {_f7e}")
+                            st.session_state[f"f7_ai_{ticker}"] = _f7_ai_txt
+                        _f7_rpt = st.session_state.get(f"f7_ai_{ticker}")
+                        if _f7_rpt:
+                            if _f7_rpt == "__QUOTA__":
+                                render_quota_error()
+                            elif _f7_rpt.startswith("❌"):
+                                render_auth_error() if "Key" in _f7_rpt else st.error(_f7_rpt)
+                            else:
+                                st.markdown(
+                                    f"<div style='background:#1B2A3D;border-left:4px solid #1F6FEB;"
+                                    f"border-radius:8px;padding:16px;font-size:14px;"
+                                    f"color:#E6EDF3;line-height:1.8;'>{_f7_rpt}</div>",
+                                    unsafe_allow_html=True,
+                                )
+                    else:
+                        st.caption("💡 AI 報告需要有效的 GEMINI_API_KEY，請在 Secrets 中配置。")
+
+            def _section_ai_report():
                 st.markdown("---")
-
-                def _render_factor_table(factor_key: str):
-                    fg = _f7.get(factor_key, {})
-                    fs = fg.get("score", 0.0)
-                    fc = "#00FF7F" if fs >= 0 else "#FF4B4B"
-                    lbl = fg.get("label", factor_key)
-                    st.markdown(
-                        f"<div style='display:flex; justify-content:space-between; "
-                        f"align-items:baseline; margin-bottom:6px;'>"
-                        f"<span style='font-weight:700; font-size:15px; color:#E6EDF3;'>"
-                        f"{lbl}</span>"
-                        f"<span style='font-size:18px; font-weight:700; color:{fc};'>"
-                        f"{fs:+.2f}</span>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-                    rows_html = (
-                        "<table style='width:100%; border-collapse:collapse; font-size:12px;'>"
-                        "<thead><tr style='color:#8B949E; border-bottom:1px solid #30363D;'>"
-                        "<th style='text-align:left; padding:4px 6px;'>FACTOR 因子</th>"
-                        "<th style='text-align:right; padding:4px 6px;'>VALUE 數值</th>"
-                        "<th style='text-align:right; padding:4px 6px;'>SCORE 評分</th>"
-                        "</tr></thead><tbody>"
-                    )
-                    for itm in fg.get("items", []):
-                        sc   = itm.get("score", 0.0)
-                        sc_c = "#00FF7F" if sc > 0 else ("#FF4B4B" if sc < 0 else "#8B949E")
-                        rows_html += (
-                            f"<tr style='border-bottom:1px solid #21262D;'>"
-                            f"<td style='padding:5px 6px; color:#C9D1D9;'>{itm['name']}</td>"
-                            f"<td style='padding:5px 6px; text-align:right; color:#8B949E;'>"
-                            f"{itm['value_str']}</td>"
-                            f"<td style='padding:5px 6px; text-align:right; "
-                            f"font-weight:700; color:{sc_c};'>{sc:+.1f}</td>"
-                            f"</tr>"
-                        )
-                    rows_html += "</tbody></table>"
-                    st.markdown(
-                        f"<div style='background:#161B22; border:1px solid #21262D; "
-                        f"border-radius:8px; padding:12px 14px; margin-bottom:12px;'>"
-                        f"{rows_html}</div>",
-                        unsafe_allow_html=True,
-                    )
-
-                # Row 1: Momentum / Value / Quality
-                _t1, _t2, _t3 = st.columns(3)
-                with _t1:
-                    _render_factor_table("Momentum")
-                with _t2:
-                    _render_factor_table("Value")
-                with _t3:
-                    _render_factor_table("Quality")
-
-                # Row 2: Growth / Volatility / Sentiment
-                _t4, _t5, _t6 = st.columns(3)
-                with _t4:
-                    _render_factor_table("Growth")
-                with _t5:
-                    _render_factor_table("Volatility")
-                with _t6:
-                    _render_factor_table("Sentiment")
-
-                # Row 3: Macro (full width)
-                _render_factor_table("Macro")
-
-                # ── AI 量化報告 ───────────────────────────────────────────
-                st.markdown("---")
-                st.markdown("**🤖 AI 量化因子報告**")
-                _f7ai_key = _get_gemini_key()
-                if _f7ai_key:
-                    if st.button("✨ 生成 AI 因子分析報告",
-                                 key=f"f7_ai_btn_{ticker}", type="primary"):
-                        with st.spinner("Gemini AI 正在解讀七大因子…"):
-                            _f7_prompt = build_factor_prompt(
-                                ticker,
-                                stock_info.get("name", ticker),
-                                _f7,
-                            )
-                            try:
-                                _f7_ai_txt = call_gemini_cached(_f7_prompt, _f7ai_key)
-                            except Exception as _f7e:
-                                _f7_ai_txt = ("__QUOTA__" if is_quota_error(_f7e)
-                                              else f"❌ {_f7e}")
-                        st.session_state[f"f7_ai_{ticker}"] = _f7_ai_txt
-
-                    _f7_rpt = st.session_state.get(f"f7_ai_{ticker}")
-                    if _f7_rpt:
-                        if _f7_rpt == "__QUOTA__":
+                st.markdown("### 🤖 Gemini AI 個股深度分析")
+                _ai_key = _get_gemini_key()
+                if _ai_key:
+                    if st.button("✨ 生成 AI 分析報告", key=f"diag_ai_btn_{ticker}",
+                                 type="primary"):
+                        with st.spinner(f"正在調用 Gemini AI 分析 {ticker}…"):
+                            _ai_text = _call_gemini_stock_ai(stock_info, hist, ticker, _ai_key)
+                        st.session_state[f"diag_ai_report_{ticker}"] = _ai_text
+                    if st.session_state.get(f"diag_ai_report_{ticker}"):
+                        _report = st.session_state[f"diag_ai_report_{ticker}"]
+                        if _report == "__QUOTA__":
                             render_quota_error()
-                        elif _f7_rpt.startswith("❌"):
-                            render_auth_error() if "Key" in _f7_rpt else st.error(_f7_rpt)
+                        elif _report.startswith("❌"):
+                            render_auth_error() if "Key" in _report else st.error(_report)
                         else:
                             st.markdown(
-                                f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
-                                f"border-radius:8px; padding:16px; font-size:14px; "
-                                f"color:#E6EDF3; line-height:1.8;'>{_f7_rpt}</div>",
+                                f"<div style='background:#1B2A3D;border-left:4px solid #1F6FEB;"
+                                f"border-radius:8px;padding:16px;font-size:14px;"
+                                f"color:#E6EDF3;line-height:1.8;'>{_report}</div>",
                                 unsafe_allow_html=True,
                             )
                 else:
-                    st.caption("💡 AI 報告需要有效的 GEMINI_API_KEY，請在 Secrets 中配置。")
+                    st.caption("💡 AI 分析需要有效的 GEMINI_API_KEY，請在 Secrets 中配置。")
 
-            # ── Section 7: Gemini AI Stock Analysis ─────────────────────────
-            st.markdown("---")
-            st.markdown("### 🤖 Gemini AI 個股深度分析")
-            _ai_key = _get_gemini_key()
-            if _ai_key:
-                if st.button("✨ 生成 AI 分析報告", key=f"diag_ai_btn_{ticker}",
-                             type="primary"):
-                    with st.spinner(f"正在調用 Gemini AI 分析 {ticker}…"):
-                        _ai_text = _call_gemini_stock_ai(stock_info, hist, ticker, _ai_key)
-                    st.session_state[f"diag_ai_report_{ticker}"] = _ai_text
-                if st.session_state.get(f"diag_ai_report_{ticker}"):
-                    _report = st.session_state[f"diag_ai_report_{ticker}"]
-                    if _report == "__QUOTA__":
-                        render_quota_error()
-                    elif _report.startswith("❌"):
-                        render_auth_error() if "Key" in _report else st.error(_report)
-                    else:
-                        st.markdown(
-                            f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
-                            f"border-radius:8px; padding:16px; font-size:14px; "
-                            f"color:#E6EDF3; line-height:1.8;'>{_report}</div>",
-                            unsafe_allow_html=True,
-                        )
-            else:
-                st.caption("💡 AI 分析需要有效的 GEMINI_API_KEY，請在 Secrets 中配置。")
+            # ── Dynamic rendering loop ─────────────────────────────────────
+            _SECTION_RENDER_MAP = {
+                "Comparison":   _section_comparison,
+                "FactorSystem": _section_factor_system,
+                "AIReport":     _section_ai_report,
+            }
+            _diag_display_order = load_order()
+            for _diag_section_key in _diag_display_order:
+                _fn = _SECTION_RENDER_MAP.get(_diag_section_key)
+                if _fn:
+                    _fn()
 
     # ══════════════════════════════════════════════════════════════════════════
     # PAGE 3 — Portfolio Dashboard

@@ -1,0 +1,7 @@
+{
+  "diag_order": [
+    "Comparison",
+    "FactorSystem",
+    "AIReport"
+  ]
+}
