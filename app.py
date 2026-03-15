@@ -763,47 +763,141 @@ def main() -> None:
             m6.metric("EPS",      f"${stock_info['eps']:.2f}" if stock_info["eps"] else "N/A")
             m7.metric("Beta",     f"{stock_info['beta']:.2f}" if stock_info["beta"] else "N/A")
 
-            # ── 1週 / 1個月 / 3個月 對比分析 ─────────────────────────────────
-            if hist is not None and not hist.empty:
-                st.markdown("---")
-                st.markdown("### 📅 歷史表現對比分析（1週 / 1個月 / 3個月）")
-                _periods = {"1 週": 5, "1 個月": 21, "3 個月": 63}
-                _tabs = st.tabs(list(_periods.keys()))
-                for _tab, (_label, _days) in zip(_tabs, _periods.items()):
-                    with _tab:
-                        _slice = hist.tail(_days)
-                        if len(_slice) < 2:
+            # ── 歷史表現對比分析（多時間區間）─────────────────────────────────
+            st.markdown("---")
+            st.markdown("### 📅 歷史表現對比分析")
+
+            # ── Period selector ────────────────────────────────────────────
+            _PERIOD_MAP = {"6M": "6mo", "1Y": "1y", "3Y": "3y", "5Y": "5y", "10Y": "10y"}
+            _sel_period = st.radio(
+                "選擇時間區間",
+                list(_PERIOD_MAP.keys()),
+                index=1,
+                horizontal=True,
+                key=f"hist_compare_period_{ticker}",
+            )
+            _yf_period  = _PERIOD_MAP[_sel_period]
+            _bm_ticker_c = st.session_state.get("benchmark", "VOO")
+
+            with st.spinner(f"載入 {_sel_period} 歷史數據…"):
+                _comp_hist = get_historical_data(ticker, _yf_period)
+                _bm_data_c = get_market_benchmark(_bm_ticker_c, _yf_period)
+
+            if _comp_hist is not None and not _comp_hist.empty:
+                _cc = _comp_hist["Close"].dropna()
+                _stock_ret = float((_cc.iloc[-1] / _cc.iloc[0] - 1) * 100)
+                _stock_hi  = float(_comp_hist["High"].max())
+                _stock_lo  = float(_comp_hist["Low"].min())
+                _stock_vol = float(_cc.pct_change().dropna().std() * (252 ** 0.5) * 100)
+                _dd_roll   = (_cc - _cc.cummax()) / _cc.cummax() * 100
+                _stock_dd  = float(_dd_roll.min())
+
+                _bm_hist_c = _bm_data_c.get("hist")
+                _bm_ret_c  = None
+                if _bm_hist_c is not None and not _bm_hist_c.empty:
+                    _bmc = _bm_hist_c["Close"].dropna()
+                    _bm_ret_c = float((_bmc.iloc[-1] / _bmc.iloc[0] - 1) * 100)
+
+                # ── Summary metric cards ───────────────────────────────────
+                _rc = "#00FF7F" if _stock_ret >= 0 else "#FF4B4B"
+                _rs = f"+{_stock_ret:.2f}%" if _stock_ret >= 0 else f"{_stock_ret:.2f}%"
+
+                _ma1, _ma2, _ma3, _ma4, _ma5 = st.columns(5)
+                _ma1.metric(f"區間報酬 ({_sel_period})", _rs,
+                            delta=_rs, delta_color="normal")
+                if _bm_ret_c is not None:
+                    _alpha_c = _stock_ret - _bm_ret_c
+                    _bm_sign = f"+{_bm_ret_c:.2f}%" if _bm_ret_c >= 0 else f"{_bm_ret_c:.2f}%"
+                    _al_sign = f"+{_alpha_c:.2f}%" if _alpha_c >= 0 else f"{_alpha_c:.2f}%"
+                    _ma2.metric(f"{_bm_ticker_c} 基準", _bm_sign,
+                                delta=_bm_sign, delta_color="normal")
+                    _ma3.metric("超額報酬 Alpha", _al_sign,
+                                delta=_al_sign, delta_color="normal")
+                else:
+                    _ma2.metric(f"{_bm_ticker_c} 基準", "N/A")
+                    _ma3.metric("超額報酬 Alpha", "N/A")
+                _ma4.metric("最大回撤", f"{_stock_dd:.2f}%")
+                _ma5.metric("年化波動率", f"{_stock_vol:.1f}%")
+
+                # ── Normalized cumulative return chart (stock vs benchmark) ─
+                _norm_df = pd.DataFrame({"日期": _cc.index,
+                                         ticker: (_cc / _cc.iloc[0] * 100).values})
+                if _bm_hist_c is not None and not _bm_hist_c.empty:
+                    _bmc2 = _bm_hist_c["Close"].dropna()
+                    _bmc2_aligned = _bmc2.reindex(_cc.index, method="ffill").dropna()
+                    if not _bmc2_aligned.empty:
+                        _norm_df[_bm_ticker_c] = (
+                            _bmc2_aligned / _bmc2_aligned.iloc[0] * 100
+                        ).values[: len(_norm_df)]
+
+                _fig_norm = go.Figure()
+                _line_colors = {"stock": "#1F6FEB", "bm": "#FF9500"}
+                _fig_norm.add_trace(go.Scatter(
+                    x=_norm_df["日期"], y=_norm_df[ticker],
+                    mode="lines", name=ticker,
+                    line=dict(color="#1F6FEB", width=2.5),
+                    hovertemplate=f"{ticker}: %{{y:.1f}}<extra></extra>",
+                ))
+                if _bm_ticker_c in _norm_df.columns:
+                    _fig_norm.add_trace(go.Scatter(
+                        x=_norm_df["日期"], y=_norm_df[_bm_ticker_c],
+                        mode="lines", name=_bm_ticker_c,
+                        line=dict(color="#FF9500", width=2, dash="dot"),
+                        hovertemplate=f"{_bm_ticker_c}: %{{y:.1f}}<extra></extra>",
+                    ))
+                _fig_norm.add_hline(y=100, line_dash="dash",
+                                    line_color="#444", line_width=1)
+                _fig_norm.update_layout(
+                    title=f"{ticker} vs {_bm_ticker_c} — 累計報酬率對比（{_sel_period}，以 100 為基準）",
+                    template="plotly_dark",
+                    paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
+                    height=320, margin=dict(t=45, b=30, l=60, r=20),
+                    hovermode="x unified", legend=dict(x=0.01, y=0.99),
+                    yaxis_title="累計報酬率（基準=100）",
+                )
+                st.plotly_chart(_fig_norm, use_container_width=True,
+                                key=f"norm_chart_{ticker}_{_sel_period}")
+
+                # ── Sub-period breakdown tabs ─────────────────────────────
+                st.markdown("**區間細分表現**")
+                _sub_periods = {"1 週": 5, "1 個月": 21, "3 個月": 63}
+                _sub_tabs = st.tabs(list(_sub_periods.keys()))
+                for _stab, (_slbl, _sdays) in zip(_sub_tabs, _sub_periods.items()):
+                    with _stab:
+                        _sl = _comp_hist.tail(_sdays)
+                        if len(_sl) < 2:
                             st.caption("資料不足，無法計算此區間。")
                             continue
-                        _open_p   = float(_slice["Close"].iloc[0])
-                        _close_p  = float(_slice["Close"].iloc[-1])
-                        _high_p   = float(_slice["High"].max())
-                        _low_p    = float(_slice["Low"].min())
-                        _ret_p    = (_close_p - _open_p) / _open_p * 100
-                        _avg_vol  = float(_slice["Volume"].mean())
-                        _ret_col  = "#00FF7F" if _ret_p >= 0 else "#FF4B4B"
-                        _ret_sign = f"+{_ret_p:.2f}%" if _ret_p >= 0 else f"{_ret_p:.2f}%"
-                        _c1, _c2, _c3, _c4 = st.columns(4)
-                        _c1.metric(f"區間報酬（{_label}）", _ret_sign,
-                                   delta=_ret_sign, delta_color="normal")
-                        _c2.metric("區間最高",  f"${_high_p:.2f}")
-                        _c3.metric("區間最低",  f"${_low_p:.2f}")
-                        _c4.metric("均日成交量", f"{_avg_vol:,.0f}")
-                        _fig_p = px.line(
-                            _slice.reset_index(),
-                            x=_slice.index, y="Close",
-                            title=f"{ticker} — {_label}收盤走勢",
+                        _so = float(_sl["Close"].iloc[0])
+                        _sc2 = float(_sl["Close"].iloc[-1])
+                        _sh = float(_sl["High"].max())
+                        _slo2 = float(_sl["Low"].min())
+                        _sr = (_sc2 - _so) / _so * 100
+                        _sv = float(_sl["Volume"].mean())
+                        _scolor = "#00FF7F" if _sr >= 0 else "#FF4B4B"
+                        _ssign = f"+{_sr:.2f}%" if _sr >= 0 else f"{_sr:.2f}%"
+                        _sc1, _sc2c, _sc3, _sc4 = st.columns(4)
+                        _sc1.metric(f"報酬（{_slbl}）", _ssign,
+                                    delta=_ssign, delta_color="normal")
+                        _sc2c.metric("區間最高", f"${_sh:.2f}")
+                        _sc3.metric("區間最低", f"${_slo2:.2f}")
+                        _sc4.metric("均日成交量", f"{_sv:,.0f}")
+                        _sfig = px.line(
+                            _sl.reset_index(), x=_sl.index, y="Close",
+                            title=f"{ticker} — {_slbl}收盤走勢",
                             labels={"Close": "收盤價 (USD)", "x": "日期"},
-                            color_discrete_sequence=[_ret_col],
+                            color_discrete_sequence=[_scolor],
                         )
-                        _fig_p.update_layout(
+                        _sfig.update_layout(
                             template="plotly_dark",
                             paper_bgcolor="#0E1117", plot_bgcolor="#1A1D2E",
-                            height=250, margin=dict(t=38, b=30, l=60, r=20),
+                            height=230, margin=dict(t=38, b=30, l=60, r=20),
                             hovermode="x unified",
                         )
-                        st.plotly_chart(_fig_p, use_container_width=True,
-                                        key=f"period_chart_{ticker}_{_label}")
+                        st.plotly_chart(_sfig, use_container_width=True,
+                                        key=f"sub_chart_{ticker}_{_slbl}_{_sel_period}")
+            else:
+                st.warning(f"無法載入 {ticker} 的 {_sel_period} 歷史數據。")
 
             # ── 決策速查表 ─────────────────────────────────────────────────────
             st.markdown("---")
