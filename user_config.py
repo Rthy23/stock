@@ -5,11 +5,13 @@ Schema (user_config.json):
 {
   "module_order":      ["Comparison", "FactorSystem", "AIReport"],
   "watchlist":         ["AAPL", "TSLA", "NVDA"],
-  "analyst_whitelist": ["@example_handle"]
+  "analyst_whitelist": ["@example_handle"],
+  "gemini_key":        {"value": "AIza...", "saved_at": "2026-01-01T00:00:00"}
 }
 """
 import json
 import os
+from datetime import datetime, timedelta
 
 _CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_config.json")
 
@@ -140,3 +142,58 @@ def remove_kol(handle: str) -> None:
     current = load_kol_whitelist()
     updated = [h for h in current if h.lower() != handle.lower()]
     save_kol_whitelist(updated)
+
+
+# ── Gemini API Key (user-entered, 30-day TTL) ─────────────────────────────────
+
+_GEMINI_TTL_DAYS = 30
+
+
+def save_gemini_key(key: str) -> None:
+    """Save a user-supplied Gemini API key with a 30-day expiry timestamp."""
+    cfg = load_config()
+    cfg["gemini_key"] = {
+        "value":    key.strip(),
+        "saved_at": datetime.utcnow().isoformat(),
+    }
+    save_config(cfg)
+
+
+def load_gemini_key() -> str:
+    """
+    Return the user-stored Gemini API key if it was saved within the last 30 days.
+    Returns empty string if not set or expired (and clears the expired entry).
+    """
+    cfg   = load_config()
+    entry = cfg.get("gemini_key", {})
+    if not entry or not entry.get("value"):
+        return ""
+    try:
+        saved_at  = datetime.fromisoformat(entry["saved_at"])
+        if datetime.utcnow() - saved_at > timedelta(days=_GEMINI_TTL_DAYS):
+            clear_gemini_key()
+            return ""
+    except Exception:
+        return ""
+    return entry["value"]
+
+
+def gemini_key_days_remaining() -> int:
+    """Return days remaining before the stored user key expires (0 = not set / expired)."""
+    cfg   = load_config()
+    entry = cfg.get("gemini_key", {})
+    if not entry or not entry.get("value"):
+        return 0
+    try:
+        saved_at  = datetime.fromisoformat(entry["saved_at"])
+        remaining = _GEMINI_TTL_DAYS - (datetime.utcnow() - saved_at).days
+        return max(0, remaining)
+    except Exception:
+        return 0
+
+
+def clear_gemini_key() -> None:
+    """Remove the user-stored Gemini API key from config."""
+    cfg = load_config()
+    cfg.pop("gemini_key", None)
+    save_config(cfg)

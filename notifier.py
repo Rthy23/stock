@@ -9,6 +9,16 @@ import time
 import requests
 from datetime import datetime, timedelta
 from pathlib import Path
+import pandas as pd
+
+
+def _tz_strip(df: pd.DataFrame) -> pd.DataFrame:
+    """Strip timezone from DataFrame index to avoid mixed-tz comparison errors."""
+    if df is not None and not df.empty:
+        if isinstance(df.index, pd.DatetimeIndex) and df.index.tz is not None:
+            df.index = df.index.tz_convert("UTC").tz_localize(None)
+    return df
+
 
 _MODULE  = "notifier"
 _CACHE_F = "telegram_notif_cache.json"
@@ -301,7 +311,7 @@ def check_watchlist_alerts(
 
     for ticker in watchlist[:10]:   # cap at 10 to avoid rate limits
         try:
-            hist = yf.Ticker(ticker).history(period="3mo")
+            hist = _tz_strip(yf.Ticker(ticker).history(period="3mo"))
             if hist.empty or len(hist) < 20:
                 continue
             close   = hist["Close"]
@@ -541,7 +551,7 @@ def get_current_prices(tickers: list[str]) -> dict:
         import yfinance as yf
         for t in tickers:
             try:
-                h = yf.Ticker(t).history(period="1d")
+                h = _tz_strip(yf.Ticker(t).history(period="1d"))
                 if not h.empty:
                     prices[t] = float(h["Close"].iloc[-1])
             except Exception:

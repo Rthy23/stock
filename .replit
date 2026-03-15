@@ -38,9 +38,3 @@ externalPort = 80
 deploymentTarget = "autoscale"
 run = ["streamlit", "run", "app.py", "--server.port", "5000"]
 
-[userenv]
-
-[userenv.shared]
-GEMINI_API_KEY = "AIzaSyDAVl9BEKeLlTYId2VwoGVn8O5PqAz-EU0"
-TELEGRAM_BOT_TOKEN = "8770465743:AAEJwv4_sUX1_KRvV3q8fwHoc0lJhAMHiOc"
-TELEGRAM_USER_ID = "6097934025"

@@ -13,6 +13,7 @@ from datetime import datetime
 
 from backtest_engine import calc_rebalance
 from ocr_module import ocr_with_gemini, render_manual_correction_form
+from data_fetcher import standardize_timezone
 import mpf_db
 import mpf_strategy
 
@@ -194,7 +195,7 @@ def get_etf_holdings(etf_ticker: str) -> pd.DataFrame:
 def _get_market_signal() -> dict:
     """Simple market condition check: SMA50 vs SMA200 of SPY."""
     try:
-        hist   = yf.Ticker("SPY").history(period="1y", auto_adjust=True)
+        hist   = standardize_timezone(yf.Ticker("SPY").history(period="1y", auto_adjust=True))
         close  = hist["Close"]
         sma50  = float(close.tail(50).mean())
         sma200 = float(close.tail(200).mean())

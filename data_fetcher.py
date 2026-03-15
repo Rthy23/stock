@@ -106,6 +106,33 @@ def fmt_usd_hkd(amount: float, decimals: int = 0) -> str:
     return f"${amount:{fmt_str}} USD (≈ ${amount * rate:{fmt_str}} HKD)"
 
 
+# ── Timezone normalisation ─────────────────────────────────────────────────────
+def standardize_timezone(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert all timezone-aware datetime index and columns to UTC-naive datetime64[ns].
+
+    Call this immediately after any yfinance .history() fetch to guarantee that
+    subsequent pd.merge / boolean comparisons never fail with mixed-tz errors.
+    """
+    if df is None or df.empty:
+        return df
+
+    # Normalise index
+    if isinstance(df.index, pd.DatetimeIndex) and df.index.tz is not None:
+        df.index = df.index.tz_convert("UTC").tz_localize(None)
+
+    # Normalise any datetime columns
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            try:
+                if df[col].dt.tz is not None:
+                    df[col] = df[col].dt.tz_convert("UTC").dt.tz_localize(None)
+            except Exception:
+                pass
+
+    return df
+
+
 # ── File I/O ───────────────────────────────────────────────────────────────────
 def load_watchlist() -> list:
     """Load watchlist from unified user_config.json."""
@@ -339,7 +366,8 @@ def get_factor_data(ticker: str) -> dict:
 
 def get_historical_data(ticker: str, period: str = "1y") -> pd.DataFrame | None:
     try:
-        return yf.Ticker(ticker).history(period=period)
+        df = yf.Ticker(ticker).history(period=period)
+        return standardize_timezone(df)
     except Exception as e:
         print(_err("get_historical_data", e))
         return None
@@ -477,16 +505,7 @@ def get_vix_history(lookback: int = 63) -> pd.DataFrame:
         hist = yf.Ticker("^VIX").history(period="3mo")
         if hist.empty:
             return pd.DataFrame()
-        df  = hist[["Close"]].copy().rename(columns={"Close": "VIX"})
-        idx = pd.to_datetime(df.index)
-        if getattr(idx, "tz", None) is not None:
-            idx = idx.tz_convert("UTC").tz_localize(None)
-        else:
-            try:
-                idx = idx.tz_localize(None)
-            except TypeError:
-                pass
-        df.index = idx
+        df = standardize_timezone(hist[["Close"]].copy()).rename(columns={"Close": "VIX"})
         return df.tail(lookback)
     except Exception as e:
         print(_err("get_vix_history", e))
@@ -508,10 +527,7 @@ def get_market_benchmark(ticker: str, period: str = "1y") -> dict:
         hist = yf.Ticker(ticker).history(period=period)
         if hist is None or hist.empty:
             return result
-        idx = pd.to_datetime(hist.index)
-        if getattr(idx, "tz", None) is not None:
-            idx = idx.tz_convert("UTC").tz_localize(None)
-        hist.index = idx
+        hist = standardize_timezone(hist)
         result["hist"]    = hist
         result["price"]   = float(hist["Close"].iloc[-1])
         result["perf_1y"] = float(

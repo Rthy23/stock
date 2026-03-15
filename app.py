@@ -29,7 +29,7 @@ from data_fetcher import (
     get_stock_info, get_historical_data, get_analyst_data,
     get_combined_sentiment, get_market_benchmark,
     save_watchlist, save_portfolio,
-    get_factor_data,
+    get_factor_data, standardize_timezone,
     SCREENER_STOCKS, BENCHMARK_LABELS, SECTOR_ETFS,
 )
 from ui_components import (
@@ -52,6 +52,7 @@ from notifier import (
 from user_config import (
     load_order, save_order, get_section_labels, SECTION_META,
     load_kol_whitelist, add_kol, remove_kol,
+    save_gemini_key, load_gemini_key, clear_gemini_key, gemini_key_days_remaining,
 )
 
 _MODULE = "main"
@@ -113,14 +114,21 @@ def _call_gemini_portfolio_ai(portfolio: dict, prices: dict, api_key: str) -> st
 
 
 def _get_gemini_key() -> str:
-    """Read Gemini API key exclusively from st.secrets / environment. No UI input."""
+    """
+    Return Gemini API key with priority:
+      1. Replit Secrets / environment variable (most secure)
+      2. User-entered key stored in user_config.json (30-day TTL)
+    """
     try:
         key = st.secrets.get("GEMINI_API_KEY", "")
         if key:
             return key
     except Exception:
         pass
-    return os.environ.get("GEMINI_API_KEY", "")
+    env_key = os.environ.get("GEMINI_API_KEY", "")
+    if env_key:
+        return env_key
+    return load_gemini_key()
 
 
 def _get_telegram_creds() -> tuple[str, str]:
@@ -294,14 +302,57 @@ def main() -> None:
     init_session()
     _inject_global_css()
 
-    # ── API key gate ──────────────────────────────────────────────────────────
-    _api_key = _get_gemini_key()
-    if not _api_key:
-        st.sidebar.warning("⚠️ GEMINI_API_KEY 未設定，AI 報告功能暫時停用。")
-
     # ── Sidebar ───────────────────────────────────────────────────────────────
     st.sidebar.title("📈 美股選股")
     st.sidebar.markdown("---")
+
+    # ── Gemini API Key management ─────────────────────────────────────────────
+    _secrets_key = ""
+    try:
+        _secrets_key = st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        pass
+    if not _secrets_key:
+        _secrets_key = os.environ.get("GEMINI_API_KEY", "")
+
+    with st.sidebar.expander("🔑 Gemini API Key", expanded=not bool(_secrets_key or load_gemini_key())):
+        if _secrets_key:
+            st.success("✅ 已透過 Replit Secrets 設定，安全且無需在此輸入。")
+        else:
+            _stored_key  = load_gemini_key()
+            _days_left   = gemini_key_days_remaining()
+            if _stored_key:
+                st.success(f"✅ 自定義 Key 生效中（剩餘 **{_days_left}** 天到期）")
+                st.caption("Key 將在 30 天後自動失效，屆時需重新輸入。")
+                if st.button("🗑️ 清除 API Key", key="clear_gemini_key_btn",
+                             use_container_width=True):
+                    clear_gemini_key()
+                    st.rerun()
+            else:
+                st.warning("⚠️ 未設定 Gemini API Key，AI 功能暫停。")
+                st.caption(
+                    "前往 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) "
+                    "免費申請，貼入下方後儲存（本地保存 30 天）。"
+                )
+                _key_input = st.text_input(
+                    "貼入 API Key", type="password",
+                    placeholder="AIzaSy...",
+                    key="gemini_key_input_field",
+                )
+                if st.button("💾 儲存 API Key", key="save_gemini_key_btn",
+                             use_container_width=True, type="primary"):
+                    _raw = _key_input.strip()
+                    if len(_raw) < 20:
+                        st.error("Key 格式錯誤，請確認完整貼入（通常以 AIzaSy 開頭）。")
+                    else:
+                        save_gemini_key(_raw)
+                        st.success("✅ 已儲存！有效期 30 天。")
+                        st.rerun()
+
+    st.sidebar.markdown("---")
+
+    # ── Resolve active API key (after potential user-input above) ─────────────
+    _api_key = _get_gemini_key()
 
     _PAGES = [
         "📡 總體市場 (Macro)",
@@ -1736,7 +1787,9 @@ def main() -> None:
                         _pf_prices = {}
                         for _t in _pf_data:
                             try:
-                                _ph = _yf_pf.Ticker(_t).history(period="1d")
+                                _ph = standardize_timezone(
+                                    _yf_pf.Ticker(_t).history(period="1d")
+                                )
                                 if not _ph.empty:
                                     _pf_prices[_t] = float(_ph["Close"].iloc[-1])
                             except Exception:

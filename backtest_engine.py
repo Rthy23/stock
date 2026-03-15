@@ -50,7 +50,8 @@ def fetch_price_history(tickers: list, years: int) -> pd.DataFrame:
         if not frames:
             return pd.DataFrame()
         df = pd.concat(frames, axis=1)
-        df.index = pd.to_datetime(df.index).tz_localize(None)
+        _idx = pd.to_datetime(df.index)
+        df.index = _idx.tz_convert("UTC").tz_localize(None) if _idx.tz is not None else _idx
         return df.dropna(how="all")
     except Exception as e:
         print(_err("fetch_price_history", e))
@@ -67,7 +68,8 @@ def fetch_ohlcv(ticker: str, years: int) -> pd.DataFrame:
             end=end.strftime("%Y-%m-%d"),
             auto_adjust=True,
         )
-        hist.index = pd.to_datetime(hist.index).tz_localize(None)
+        _hidx = pd.to_datetime(hist.index)
+        hist.index = _hidx.tz_convert("UTC").tz_localize(None) if _hidx.tz is not None else _hidx
         return hist[["Open", "High", "Low", "Close", "Volume"]].dropna()
     except Exception as e:
         print(_err(f"fetch_ohlcv[{ticker}]", e))
