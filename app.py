@@ -116,8 +116,11 @@ def _call_gemini_portfolio_ai(portfolio: dict, prices: dict, api_key: str) -> st
 def _get_gemini_key() -> str:
     """
     Return Gemini API key with priority:
-      1. Replit Secrets / environment variable (most secure)
-      2. User-entered key stored in user_config.json (30-day TTL)
+      1. Replit Secrets panel (st.secrets)  — most secure
+      2. User-entered key in user_config.json (30-day TTL)
+      3. os.environ fallback (e.g. .replit [userenv.shared])
+    User-entered key is intentionally ranked above os.environ so that
+    a freshly entered key always overrides a stale key from .replit.
     """
     try:
         key = st.secrets.get("GEMINI_API_KEY", "")
@@ -125,10 +128,10 @@ def _get_gemini_key() -> str:
             return key
     except Exception:
         pass
-    env_key = os.environ.get("GEMINI_API_KEY", "")
-    if env_key:
-        return env_key
-    return load_gemini_key()
+    user_key = load_gemini_key()
+    if user_key:
+        return user_key
+    return os.environ.get("GEMINI_API_KEY", "")
 
 
 def _get_telegram_creds() -> tuple[str, str]:
@@ -307,47 +310,49 @@ def main() -> None:
     st.sidebar.markdown("---")
 
     # ── Gemini API Key management ─────────────────────────────────────────────
-    _secrets_key = ""
+    # ONLY st.secrets counts as "Replit Secrets panel" — os.environ is NOT
+    # shown as Secrets because .replit [userenv.shared] also populates os.environ
+    # and that key may be stale / compromised.
+    _true_secrets_key = ""
     try:
-        _secrets_key = st.secrets.get("GEMINI_API_KEY", "")
+        _true_secrets_key = st.secrets.get("GEMINI_API_KEY", "")
     except Exception:
         pass
-    if not _secrets_key:
-        _secrets_key = os.environ.get("GEMINI_API_KEY", "")
 
-    with st.sidebar.expander("🔑 Gemini API Key", expanded=not bool(_secrets_key or load_gemini_key())):
-        if _secrets_key:
+    _stored_key = load_gemini_key()
+    _has_any_key = bool(_true_secrets_key or _stored_key)
+
+    with st.sidebar.expander("🔑 Gemini API Key", expanded=not _has_any_key):
+        if _true_secrets_key:
             st.success("✅ 已透過 Replit Secrets 設定，安全且無需在此輸入。")
+        elif _stored_key:
+            _days_left = gemini_key_days_remaining()
+            st.success(f"✅ 自定義 Key 生效中（剩餘 **{_days_left}** 天到期）")
+            st.caption("Key 將在 30 天後自動失效，屆時需重新輸入。")
+            if st.button("🗑️ 清除 API Key", key="clear_gemini_key_btn",
+                         use_container_width=True):
+                clear_gemini_key()
+                st.rerun()
         else:
-            _stored_key  = load_gemini_key()
-            _days_left   = gemini_key_days_remaining()
-            if _stored_key:
-                st.success(f"✅ 自定義 Key 生效中（剩餘 **{_days_left}** 天到期）")
-                st.caption("Key 將在 30 天後自動失效，屆時需重新輸入。")
-                if st.button("🗑️ 清除 API Key", key="clear_gemini_key_btn",
-                             use_container_width=True):
-                    clear_gemini_key()
+            st.warning("⚠️ 未設定有效的 Gemini API Key，AI 功能暫停。")
+            st.caption(
+                "前往 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) "
+                "免費申請新的 Key，貼入下方後儲存（本地保存 30 天）。"
+            )
+            _key_input = st.text_input(
+                "貼入 API Key", type="password",
+                placeholder="AIzaSy...",
+                key="gemini_key_input_field",
+            )
+            if st.button("💾 儲存 API Key", key="save_gemini_key_btn",
+                         use_container_width=True, type="primary"):
+                _raw = _key_input.strip()
+                if len(_raw) < 20:
+                    st.error("Key 格式錯誤，請確認完整貼入（通常以 AIzaSy 開頭）。")
+                else:
+                    save_gemini_key(_raw)
+                    st.success("✅ 已儲存！有效期 30 天。")
                     st.rerun()
-            else:
-                st.warning("⚠️ 未設定 Gemini API Key，AI 功能暫停。")
-                st.caption(
-                    "前往 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) "
-                    "免費申請，貼入下方後儲存（本地保存 30 天）。"
-                )
-                _key_input = st.text_input(
-                    "貼入 API Key", type="password",
-                    placeholder="AIzaSy...",
-                    key="gemini_key_input_field",
-                )
-                if st.button("💾 儲存 API Key", key="save_gemini_key_btn",
-                             use_container_width=True, type="primary"):
-                    _raw = _key_input.strip()
-                    if len(_raw) < 20:
-                        st.error("Key 格式錯誤，請確認完整貼入（通常以 AIzaSy 開頭）。")
-                    else:
-                        save_gemini_key(_raw)
-                        st.success("✅ 已儲存！有效期 30 天。")
-                        st.rerun()
 
     st.sidebar.markdown("---")
 
