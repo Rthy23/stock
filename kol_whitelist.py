@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 
 import streamlit as st
+from user_config import load_kol_whitelist
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 1. WHITELIST — 手工篩選高信譽分析師
@@ -326,9 +327,28 @@ def render_kol_section(api_key: str = "") -> None:
         "觀點一致性、時效性、論點品質三維加權計分。"
     )
 
+    # ── 合併用戶自定義 KOL ──────────────────────────────────────────────────────
+    _user_handles = load_kol_whitelist()
+    _user_kols: List[Dict] = []
+    for _h in _user_handles:
+        _user_kols.append({
+            "id":           _h.lstrip("@").lower().replace(" ", "_"),
+            "name":         _h,
+            "org":          "用戶自定義",
+            "focus":        "（未設定）",
+            "platform":     _h,
+            "stance":       "中性",
+            "stance_color": "#8B949E",
+            "rep":          3,
+            "years_active": 0,
+            "type":         "用戶手動加入",
+            "rationale":    "由用戶透過白名單管理面板手動加入。",
+        })
+    _all_kols: List[Dict] = list(WHITELIST) + _user_kols
+
     # ── 白名單卡片 ──
-    with st.expander("📋 查看白名單分析師（共 8 位）", expanded=False):
-        for kol in WHITELIST:
+    with st.expander(f"📋 查看白名單分析師（共 {len(_all_kols)} 位）", expanded=False):
+        for kol in _all_kols:
             star_str = "⭐" * kol["rep"]
             cols = st.columns([3, 1])
             with cols[0]:
@@ -394,13 +414,14 @@ def render_kol_section(api_key: str = "") -> None:
             key="kol_run_ai",
         )
 
-    if run_ai or st.session_state.get("kol_ai_done"):
-        if run_ai:
-            with st.spinner("Gemini 正在整合各方觀點並評估信心指數…"):
-                enhanced = call_gemini_consensus(top_picks[:5], api_key)
-            st.session_state["kol_ai_result"] = enhanced
-            st.session_state["kol_ai_done"]   = True
+    if run_ai:
+        with st.spinner("Gemini 正在整合各方觀點並評估信心指數…"):
+            enhanced = call_gemini_consensus(top_picks[:5], api_key)
+        st.session_state["kol_ai_result"] = enhanced
+        st.session_state["kol_ai_done"]   = True
+        st.rerun()
 
+    if st.session_state.get("kol_ai_done"):
         enhanced = st.session_state.get("kol_ai_result", [])
         if enhanced:
             _render_ai_cards(enhanced)

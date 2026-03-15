@@ -49,7 +49,10 @@ from notifier import (
     run_all_checks, get_current_prices,
     load_notification_log, send_telegram_notification,
 )
-from user_config import load_order, save_order, get_section_labels, SECTION_META
+from user_config import (
+    load_order, save_order, get_section_labels, SECTION_META,
+    load_kol_whitelist, add_kol, remove_kol,
+)
 
 _MODULE = "main"
 
@@ -418,13 +421,15 @@ def main() -> None:
                     "   TELEGRAM_BOT_TOKEN\n"
                     "   TELEGRAM_USER_ID")
 
-    # ── Module order customiser ───────────────────────────────────────────────
+    # ── Personalisation Settings (module order + watchlist + KOL whitelist) ──
     st.sidebar.markdown("---")
-    with st.sidebar.expander("📐 個股診斷模組排序", expanded=False):
-        st.caption("拖曳或修改「顯示順序」欄位的數字（1 最先顯示），再點擊「儲存排序」。")
+    with st.sidebar.expander("⚙️ 個人化設定", expanded=False):
+
+        # ── Tab 1: Module ordering ────────────────────────────────────────────
+        st.markdown("**📐 個股診斷模組排序**")
+        st.caption("修改「顯示順序」數字（1 = 最頂部），點擊「儲存排序」生效。")
         _sec_labels = get_section_labels()
         _cur_order  = load_order()
-
         _cfg_df = pd.DataFrame({
             "模組名稱": [_sec_labels[k] for k in _cur_order],
             "顯示順序": list(range(1, len(_cur_order) + 1)),
@@ -450,8 +455,81 @@ def main() -> None:
             _sorted_cfg = _merged.sort_values("顯示順序").reset_index(drop=True)
             _new_order  = _sorted_cfg["_key"].tolist()
             save_order(_new_order)
-            st.success("✅ 排序已儲存！下次載入頁面生效。")
+            st.success("✅ 排序已儲存！")
             st.rerun()
+
+        st.markdown("---")
+
+        # ── Tab 2: Watchlist management ───────────────────────────────────────
+        st.markdown("**🌟 收藏股票清單**")
+        _wl = list(st.session_state.get("watchlist", []))
+        if _wl:
+            st.caption(f"目前 {len(_wl)} 支：" + "、".join(_wl))
+        else:
+            st.caption("清單目前為空。")
+
+        _wl_col1, _wl_col2 = st.columns([3, 1])
+        with _wl_col1:
+            _wl_new = st.text_input(
+                "新增股票代號", placeholder="AAPL",
+                key="sidebar_wl_add_input", label_visibility="collapsed",
+            )
+        with _wl_col2:
+            if st.button("＋", key="sidebar_wl_add_btn", use_container_width=True):
+                _ticker_add = _wl_new.strip().upper()
+                if _ticker_add and _ticker_add not in _wl:
+                    _wl.append(_ticker_add)
+                    st.session_state["watchlist"] = _wl
+                    save_watchlist(_wl)
+                    st.rerun()
+
+        if _wl:
+            _rm_choice = st.selectbox(
+                "移除股票", options=["（選擇）"] + _wl,
+                key="sidebar_wl_remove_select",
+            )
+            if st.button("🗑️ 移除", key="sidebar_wl_remove_btn",
+                         use_container_width=True):
+                if _rm_choice != "（選擇）" and _rm_choice in _wl:
+                    _wl.remove(_rm_choice)
+                    st.session_state["watchlist"] = _wl
+                    save_watchlist(_wl)
+                    st.rerun()
+
+        st.markdown("---")
+
+        # ── Tab 3: KOL whitelist management ──────────────────────────────────
+        st.markdown("**📝 KOL / 分析師白名單**")
+        st.caption("輸入 X 或 Threads 帳號（含 @ 符號），加入爬蟲監控清單。")
+        _kol_list = load_kol_whitelist()
+        if _kol_list:
+            for _kh in _kol_list:
+                _kc1, _kc2 = st.columns([3, 1])
+                with _kc1:
+                    st.markdown(f"`{_kh}`")
+                with _kc2:
+                    if st.button("✕", key=f"kol_rm_{_kh}",
+                                 use_container_width=True):
+                        remove_kol(_kh)
+                        st.rerun()
+        else:
+            st.caption("尚未加入任何 KOL。")
+
+        _kol_col1, _kol_col2 = st.columns([3, 1])
+        with _kol_col1:
+            _kol_input = st.text_input(
+                "KOL 帳號", placeholder="@handle",
+                key="sidebar_kol_add_input", label_visibility="collapsed",
+            )
+        with _kol_col2:
+            if st.button("加入", key="sidebar_kol_add_btn",
+                         use_container_width=True):
+                _ok, _msg = add_kol(_kol_input)
+                if _ok:
+                    st.success(_msg)
+                    st.rerun()
+                else:
+                    st.error(_msg)
 
     # ── Benchmark monitor ─────────────────────────────────────────────────────
     st.sidebar.markdown("---")
@@ -1582,6 +1660,7 @@ def main() -> None:
                                     _f7_ai_txt = ("__QUOTA__" if is_quota_error(_f7e)
                                                   else f"❌ {_f7e}")
                             st.session_state[f"f7_ai_{ticker}"] = _f7_ai_txt
+                            st.rerun()
                         _f7_rpt = st.session_state.get(f"f7_ai_{ticker}")
                         if _f7_rpt:
                             if _f7_rpt == "__QUOTA__":
@@ -1608,6 +1687,7 @@ def main() -> None:
                         with st.spinner(f"正在調用 Gemini AI 分析 {ticker}…"):
                             _ai_text = _call_gemini_stock_ai(stock_info, hist, ticker, _ai_key)
                         st.session_state[f"diag_ai_report_{ticker}"] = _ai_text
+                        st.rerun()
                     if st.session_state.get(f"diag_ai_report_{ticker}"):
                         _report = st.session_state[f"diag_ai_report_{ticker}"]
                         if _report == "__QUOTA__":
@@ -1663,6 +1743,7 @@ def main() -> None:
                                 _pf_prices[_t] = _pf_data[_t].get("buy_price", 0)
                         _pf_ai_text = _call_gemini_portfolio_ai(_pf_data, _pf_prices, _pf_ai_key)
                     st.session_state["pf_ai_report"] = _pf_ai_text
+                    st.rerun()
                 if st.session_state.get("pf_ai_report"):
                     _pf_report = st.session_state["pf_ai_report"]
                     if _pf_report == "__QUOTA__":
@@ -2215,6 +2296,7 @@ def main() -> None:
                             report_text = generate_quant_report(result, gemini_key_val)
                         if report_text:
                             st.session_state["bt_gemini_report"] = report_text
+                            st.rerun()
                         else:
                             st.warning("AI 報告生成失敗，請確認 GEMINI_API_KEY 已正確設定於 Secrets。")
                     _bt_report = st.session_state.get("bt_gemini_report")

@@ -12,6 +12,7 @@ import base64
 import re
 
 from analysis import classify_sentiment
+from user_config import load_watchlist_cfg, save_watchlist_cfg
 
 _MODULE = "data_fetcher"
 
@@ -107,21 +108,18 @@ def fmt_usd_hkd(amount: float, decimals: int = 0) -> str:
 
 # ── File I/O ───────────────────────────────────────────────────────────────────
 def load_watchlist() -> list:
+    """Load watchlist from unified user_config.json."""
     try:
-        if os.path.exists(WATCHLIST_FILE):
-            with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    return data
+        return load_watchlist_cfg()
     except Exception as e:
         print(_err("load_watchlist", e))
-    return []
+        return []
 
 
 def save_watchlist(watchlist: list) -> None:
+    """Persist watchlist to unified user_config.json."""
     try:
-        with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
-            json.dump(watchlist, f, ensure_ascii=False, indent=2)
+        save_watchlist_cfg(watchlist)
     except Exception as e:
         print(_err("save_watchlist", e))
 

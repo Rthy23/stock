@@ -1,7 +1,9 @@
 {
-  "diag_order": [
+  "module_order": [
     "Comparison",
     "FactorSystem",
     "AIReport"
-  ]
+  ],
+  "watchlist": [],
+  "analyst_whitelist": []
 }
