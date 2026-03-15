@@ -23,11 +23,13 @@ from analysis import (
     compute_technicals, screen_stocks, format_market_cap,
     calc_buy_zone, calc_exit_strategy, classify_investment_horizon,
     plot_relative_strength, plot_four_quadrant,
+    calculate_seven_factors, plot_factor_radar, build_factor_prompt,
 )
 from data_fetcher import (
     get_stock_info, get_historical_data, get_analyst_data,
     get_combined_sentiment, get_market_benchmark,
     save_watchlist, save_portfolio,
+    get_factor_data,
     SCREENER_STOCKS, BENCHMARK_LABELS, SECTOR_ETFS,
 )
 from ui_components import (
@@ -1329,6 +1331,207 @@ def main() -> None:
                         )
             except Exception:
                 st.caption("⏳ 分析師數據暫時不可用，請稍後再試。")
+
+            # ── Section 8: 7-Factor Multi-Factor Analysis ───────────────────
+            st.markdown("---")
+            st.markdown("### 📊 7-Factor 多因子分析系統")
+            _f7_key = f"factor7_{ticker}"
+            _f7_data_key = f"factor7_data_{ticker}"
+
+            if st.button("🔬 計算七大因子", key=f"f7_btn_{ticker}",
+                         type="primary", use_container_width=True):
+                with st.spinner(f"正在計算 {ticker} 七大因子…"):
+                    _fd = get_factor_data(ticker)
+                    _f7 = calculate_seven_factors(stock_info, hist, _fd)
+                st.session_state[_f7_key]      = _f7
+                st.session_state[_f7_data_key] = _fd
+
+            _f7 = st.session_state.get(_f7_key)
+            if _f7:
+                _comp   = _f7.get("composite", 0)
+                _signal = _f7.get("signal", "HOLD")
+                _signal_colors = {
+                    "STRONG BUY":  ("#00FF7F", "#0D2E1A"),
+                    "BUY":         ("#7CFC00", "#132A13"),
+                    "HOLD":        ("#FFD700", "#2D2500"),
+                    "SELL":        ("#FF8C00", "#2D1800"),
+                    "STRONG SELL": ("#FF4B4B", "#2D1B1B"),
+                }
+                _sc, _sbg = _signal_colors.get(_signal, ("#FFD700", "#2D2500"))
+
+                # ── Header card ──────────────────────────────────────────
+                _name_disp = stock_info.get("name", ticker)
+                st.markdown(
+                    f"<div style='background:#161B22; border:1px solid #30363D; "
+                    f"border-radius:12px; padding:20px 28px; margin-bottom:16px;'>"
+                    f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
+                    f"<div>"
+                    f"<div style='font-size:24px; font-weight:700; color:#E6EDF3;'>{ticker}</div>"
+                    f"<div style='color:{_sc}; font-size:18px; font-weight:700; margin-top:4px;'>"
+                    f"{_signal}</div>"
+                    f"<div style='color:#8B949E; font-size:12px; margin-top:2px;'>"
+                    f"7-Factor Composite Score</div>"
+                    f"</div>"
+                    f"<div style='text-align:right;'>"
+                    f"<div style='font-size:48px; font-weight:700; color:{_sc};'>"
+                    f"{_comp:+.2f}</div>"
+                    f"<div style='color:#8B949E; font-size:12px;'>Range: -5 to +5</div>"
+                    f"<div style='width:180px; height:6px; background:#21262D; "
+                    f"border-radius:3px; margin-top:6px; overflow:hidden;'>"
+                    f"<div style='width:{max(0, min(100, (_comp+5)/10*100)):.1f}%; "
+                    f"height:100%; background:{_sc}; border-radius:3px;'></div>"
+                    f"</div>"
+                    f"</div></div></div>",
+                    unsafe_allow_html=True,
+                )
+
+                # ── Radar chart + Score bars ──────────────────────────────
+                _fcol1, _fcol2 = st.columns([1, 1])
+
+                with _fcol1:
+                    st.markdown("**Factor Exposure Radar 因子雷達圖**")
+                    _radar_fig = plot_factor_radar(_f7, ticker)
+                    st.plotly_chart(_radar_fig, use_container_width=True,
+                                    key=f"f7_radar_{ticker}")
+
+                with _fcol2:
+                    st.markdown("**Group Scores 因子組評分**")
+                    _factor_order = ["Momentum", "Value", "Quality", "Growth",
+                                     "Volatility", "Sentiment", "Macro"]
+                    for _fk in _factor_order:
+                        _fg   = _f7.get(_fk, {})
+                        _flbl = _fg.get("label", _fk)
+                        _fs   = _fg.get("score", 0.0)
+                        _fc   = "#00FF7F" if _fs >= 0 else "#FF4B4B"
+                        # bar width: score/5 → 50% of half-bar; 0→50%, +5→100%, -5→0%
+                        _bar_w_pct = (_fs / 5) * 50   # -50% to +50%
+                        if _fs >= 0:
+                            _bar_left = "50%"
+                            _bar_w_css = f"{_bar_w_pct:.1f}%"
+                        else:
+                            _bar_left = f"{50 + _bar_w_pct:.1f}%"
+                            _bar_w_css = f"{-_bar_w_pct:.1f}%"
+                        st.markdown(
+                            f"<div style='margin-bottom:10px;'>"
+                            f"<div style='display:flex; justify-content:space-between; "
+                            f"align-items:center; margin-bottom:3px;'>"
+                            f"<span style='color:#C9D1D9; font-size:13px;'>{_flbl}</span>"
+                            f"<span style='color:{_fc}; font-weight:700; font-size:13px;'>"
+                            f"{_fs:+.2f}</span>"
+                            f"</div>"
+                            f"<div style='position:relative; height:8px; background:#21262D; "
+                            f"border-radius:4px; overflow:hidden;'>"
+                            f"<div style='position:absolute; left:50%; height:100%; "
+                            f"width:1px; background:#444;'></div>"
+                            f"<div style='position:absolute; left:{_bar_left}; "
+                            f"width:{_bar_w_css}; height:100%; background:{_fc}; "
+                            f"border-radius:4px;'></div>"
+                            f"</div></div>",
+                            unsafe_allow_html=True,
+                        )
+
+                # ── Factor detail tables ──────────────────────────────────
+                st.markdown("---")
+
+                def _render_factor_table(factor_key: str):
+                    fg = _f7.get(factor_key, {})
+                    fs = fg.get("score", 0.0)
+                    fc = "#00FF7F" if fs >= 0 else "#FF4B4B"
+                    lbl = fg.get("label", factor_key)
+                    st.markdown(
+                        f"<div style='display:flex; justify-content:space-between; "
+                        f"align-items:baseline; margin-bottom:6px;'>"
+                        f"<span style='font-weight:700; font-size:15px; color:#E6EDF3;'>"
+                        f"{lbl}</span>"
+                        f"<span style='font-size:18px; font-weight:700; color:{fc};'>"
+                        f"{fs:+.2f}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                    rows_html = (
+                        "<table style='width:100%; border-collapse:collapse; font-size:12px;'>"
+                        "<thead><tr style='color:#8B949E; border-bottom:1px solid #30363D;'>"
+                        "<th style='text-align:left; padding:4px 6px;'>FACTOR 因子</th>"
+                        "<th style='text-align:right; padding:4px 6px;'>VALUE 數值</th>"
+                        "<th style='text-align:right; padding:4px 6px;'>SCORE 評分</th>"
+                        "</tr></thead><tbody>"
+                    )
+                    for itm in fg.get("items", []):
+                        sc   = itm.get("score", 0.0)
+                        sc_c = "#00FF7F" if sc > 0 else ("#FF4B4B" if sc < 0 else "#8B949E")
+                        rows_html += (
+                            f"<tr style='border-bottom:1px solid #21262D;'>"
+                            f"<td style='padding:5px 6px; color:#C9D1D9;'>{itm['name']}</td>"
+                            f"<td style='padding:5px 6px; text-align:right; color:#8B949E;'>"
+                            f"{itm['value_str']}</td>"
+                            f"<td style='padding:5px 6px; text-align:right; "
+                            f"font-weight:700; color:{sc_c};'>{sc:+.1f}</td>"
+                            f"</tr>"
+                        )
+                    rows_html += "</tbody></table>"
+                    st.markdown(
+                        f"<div style='background:#161B22; border:1px solid #21262D; "
+                        f"border-radius:8px; padding:12px 14px; margin-bottom:12px;'>"
+                        f"{rows_html}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                # Row 1: Momentum / Value / Quality
+                _t1, _t2, _t3 = st.columns(3)
+                with _t1:
+                    _render_factor_table("Momentum")
+                with _t2:
+                    _render_factor_table("Value")
+                with _t3:
+                    _render_factor_table("Quality")
+
+                # Row 2: Growth / Volatility / Sentiment
+                _t4, _t5, _t6 = st.columns(3)
+                with _t4:
+                    _render_factor_table("Growth")
+                with _t5:
+                    _render_factor_table("Volatility")
+                with _t6:
+                    _render_factor_table("Sentiment")
+
+                # Row 3: Macro (full width)
+                _render_factor_table("Macro")
+
+                # ── AI 量化報告 ───────────────────────────────────────────
+                st.markdown("---")
+                st.markdown("**🤖 AI 量化因子報告**")
+                _f7ai_key = _get_gemini_key()
+                if _f7ai_key:
+                    if st.button("✨ 生成 AI 因子分析報告",
+                                 key=f"f7_ai_btn_{ticker}", type="primary"):
+                        with st.spinner("Gemini AI 正在解讀七大因子…"):
+                            _f7_prompt = build_factor_prompt(
+                                ticker,
+                                stock_info.get("name", ticker),
+                                _f7,
+                            )
+                            try:
+                                _f7_ai_txt = call_gemini_cached(_f7_prompt, _f7ai_key)
+                            except Exception as _f7e:
+                                _f7_ai_txt = ("__QUOTA__" if is_quota_error(_f7e)
+                                              else f"❌ {_f7e}")
+                        st.session_state[f"f7_ai_{ticker}"] = _f7_ai_txt
+
+                    _f7_rpt = st.session_state.get(f"f7_ai_{ticker}")
+                    if _f7_rpt:
+                        if _f7_rpt == "__QUOTA__":
+                            render_quota_error()
+                        elif _f7_rpt.startswith("❌"):
+                            render_auth_error() if "Key" in _f7_rpt else st.error(_f7_rpt)
+                        else:
+                            st.markdown(
+                                f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
+                                f"border-radius:8px; padding:16px; font-size:14px; "
+                                f"color:#E6EDF3; line-height:1.8;'>{_f7_rpt}</div>",
+                                unsafe_allow_html=True,
+                            )
+                else:
+                    st.caption("💡 AI 報告需要有效的 GEMINI_API_KEY，請在 Secrets 中配置。")
 
             # ── Section 7: Gemini AI Stock Analysis ─────────────────────────
             st.markdown("---")

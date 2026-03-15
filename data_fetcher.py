@@ -286,6 +286,59 @@ def get_stock_info(ticker: str) -> dict | None:
         return None
 
 
+@st.cache_data(ttl=600)
+def get_factor_data(ticker: str) -> dict:
+    """
+    Fetch all additional financial metrics needed for 7-Factor analysis.
+    Returns a flat dict of raw metric values; None for unavailable fields.
+    Cached for 10 minutes to reduce redundant yfinance calls.
+    """
+    try:
+        info = yf.Ticker(ticker).info
+        def _f(key, default=None):
+            v = info.get(key, default)
+            return v if v is not None and v != 0 else default
+
+        return {
+            # Value
+            "pe_ratio":          _f("trailingPE"),
+            "pb_ratio":          _f("priceToBook"),
+            "ev_ebitda":         _f("enterpriseToEbitda"),
+            "ps_ratio":          _f("priceToSalesTrailing12Months"),
+            "dividend_yield":    (_f("dividendYield") or 0) * 100,  # convert to %
+            # Quality
+            "roe":               (_f("returnOnEquity") or 0) * 100,
+            "roa":               (_f("returnOnAssets") or 0) * 100,
+            "gross_margin":      (_f("grossMargins") or 0) * 100,
+            "op_margin":         (_f("operatingMargins") or 0) * 100,
+            "net_margin":        (_f("profitMargins") or 0) * 100,
+            "debt_equity":       _f("debtToEquity"),
+            "current_ratio":     _f("currentRatio"),
+            # Growth
+            "rev_growth":        (_f("revenueGrowth") or 0) * 100,
+            "eps_growth":        (_f("earningsGrowth") or 0) * 100,
+            "fwd_eps":           _f("forwardEps"),
+            "trailing_eps":      _f("trailingEps"),
+            # Volatility
+            "beta":              _f("beta"),
+            # Sentiment
+            "short_ratio":       _f("shortRatio"),        # days to cover
+            "short_pct":         (_f("shortPercentOfFloat") or 0) * 100,
+            "inst_ownership":    (_f("heldPercentInstitutions") or 0) * 100,
+            "insider_ownership": (_f("heldPercentInsiders") or 0) * 100,
+            "rec_mean":          _f("recommendationMean"),  # 1=Strong Buy … 5=Sell
+            "num_analysts":      _f("numberOfAnalystOpinions", 0),
+            "target_mean":       _f("targetMeanPrice"),
+            "price":             _f("currentPrice") or _f("regularMarketPrice"),
+            # Extra
+            "sector":            info.get("sector", "N/A"),
+            "industry":          info.get("industry", "N/A"),
+        }
+    except Exception as e:
+        print(_err("get_factor_data", e))
+        return {}
+
+
 def get_historical_data(ticker: str, period: str = "1y") -> pd.DataFrame | None:
     try:
         return yf.Ticker(ticker).history(period=period)

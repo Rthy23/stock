@@ -13,8 +13,8 @@ A Streamlit-based US stock screening and trading dashboard with technical analys
 ## Key Files
 
 - `app.py` — Main Streamlit app entry point, page routing, sidebar navigation
-- `analysis.py` — Technical indicators, stock screening, buy zone/exit strategy calculations, charts
-- `data_fetcher.py` — yfinance data fetching, watchlist/portfolio persistence, market benchmarks
+- `analysis.py` — Technical indicators, stock screening, buy zone/exit strategy calculations, charts; includes full **7-Factor engine** (`calculate_factor_score`, `calculate_seven_factors`, `plot_factor_radar`, `build_factor_prompt`)
+- `data_fetcher.py` — yfinance data fetching, watchlist/portfolio persistence, market benchmarks; includes `get_factor_data()` (10-min cached, fetches ROE/ROA/PB/EV-EBITDA/short-pct/inst-ownership etc.)
 - `ui_components.py` — Reusable Streamlit UI components and session state management
 - `backtest_engine.py` — RSI mean-reversion backtest engine with SMA200 filter, dynamic stop-loss, individual_series
 - `mpf_assistant.py` — MPF (積金) intelligent advisor: OCR, portfolio, rebalance, strategy signals, AI report
