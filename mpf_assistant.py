@@ -191,7 +191,7 @@ def get_etf_holdings(etf_ticker: str) -> pd.DataFrame:
 
 
 # ── Market alert engine ────────────────────────────────────────────────────────
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def _get_market_signal() -> dict:
     """Simple market condition check: SMA50 vs SMA200 of SPY."""
     try:

@@ -311,7 +311,7 @@ def get_stock_info(ticker: str) -> dict | None:
         return None
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=900)
 def get_factor_data(ticker: str) -> dict:
     """
     Fetch all additional financial metrics needed for 7-Factor analysis.
@@ -381,7 +381,7 @@ def get_stock_news(ticker: str) -> list:
         return []
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=900)
 def get_analyst_data(ticker: str) -> dict:
     """
     Fetch analyst consensus rating and price targets.
@@ -417,7 +417,7 @@ def get_analyst_data(ticker: str) -> dict:
 
 
 # ── Social / sentiment signals ─────────────────────────────────────────────────
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=900)
 def get_social_sentiment(ticker: str) -> dict:
     """
     StockTwits public API → bull/bear ratio → 0-100 score.
@@ -454,7 +454,7 @@ def get_social_sentiment(ticker: str) -> dict:
         return default
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=900)
 def get_news_sentiment_score(ticker: str) -> float:
     """
     Fetch stock news and run keyword sentiment.
@@ -498,7 +498,7 @@ def get_combined_sentiment(ticker: str) -> dict:
 
 
 # ── VIX / benchmark ───────────────────────────────────────────────────────────
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=900)
 def get_vix_history(lookback: int = 63) -> pd.DataFrame:
     """Fetch ^VIX history for ~3 months; return DataFrame with Close renamed to VIX."""
     try:
@@ -512,7 +512,7 @@ def get_vix_history(lookback: int = 63) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=900)
 def get_market_benchmark(ticker: str, period: str = "1y") -> dict:
     """
     Fetch benchmark ETF history + SMA50/SMA200 + golden cross flag.
