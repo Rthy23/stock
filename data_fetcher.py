@@ -535,29 +535,29 @@ def get_vix_history(lookback: int = 63) -> pd.DataFrame:
 def get_market_benchmark(ticker: str, period: str = "1y") -> dict:
     """
     Fetch benchmark ETF history + SMA50/SMA200 + golden cross flag.
-    Returns a safe dict even on failure.
+    Raises RuntimeError on insufficient data so @st.cache_data never caches
+    a result with golden_cross=None (which would persist "載入中" for 15 min).
     """
+    hist = yf.Ticker(ticker).history(period=period)
+    if hist is None or hist.empty:
+        raise RuntimeError(f"get_market_benchmark: no data returned for {ticker}")
+    hist = standardize_timezone(hist)
+    if len(hist) < 50:
+        raise RuntimeError(
+            f"get_market_benchmark: only {len(hist)} rows for {ticker}; need ≥50"
+        )
     result: dict = {
         "ticker": ticker, "label": BENCHMARK_LABELS.get(ticker, ticker),
         "sma50": None, "sma200": None, "golden_cross": None,
-        "price": None, "hist": None, "perf_1y": None,
+        "price": None, "hist": hist, "perf_1y": None,
     }
-    try:
-        hist = yf.Ticker(ticker).history(period=period)
-        if hist is None or hist.empty:
-            return result
-        hist = standardize_timezone(hist)
-        result["hist"]    = hist
-        result["price"]   = float(hist["Close"].iloc[-1])
-        result["perf_1y"] = float(
-            (hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1) * 100
-        )
-        if len(hist) >= 50:
-            result["sma50"]  = float(hist["Close"].rolling(50).mean().iloc[-1])
-        if len(hist) >= 200:
-            result["sma200"] = float(hist["Close"].rolling(200).mean().iloc[-1])
-        if result["sma50"] and result["sma200"]:
-            result["golden_cross"] = result["sma50"] > result["sma200"]
-    except Exception as e:
-        print(_err("get_market_benchmark", e))
+    result["price"]   = float(hist["Close"].iloc[-1])
+    result["perf_1y"] = float(
+        (hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1) * 100
+    )
+    result["sma50"] = float(hist["Close"].rolling(50).mean().iloc[-1])
+    if len(hist) >= 200:
+        result["sma200"] = float(hist["Close"].rolling(200).mean().iloc[-1])
+    if result["sma50"] is not None and result["sma200"] is not None:
+        result["golden_cross"] = bool(result["sma50"] > result["sma200"])
     return result

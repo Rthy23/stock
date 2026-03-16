@@ -593,14 +593,19 @@ def main() -> None:
         help="切換基準指數以更新黃金/死亡交叉提示及個股相對強弱比較",
     )
 
+    _bm_ss_key = f"_bm_cache_{benchmark}"
     with st.sidebar:
         with st.spinner("更新大盤數據…"):
             try:
                 bm = get_market_benchmark(benchmark, "1y")
+                st.session_state[_bm_ss_key] = bm
             except Exception:
-                bm = {"ticker": benchmark, "label": benchmark,
-                      "sma50": None, "sma200": None,
-                      "golden_cross": None, "price": None, "perf_1y": None}
+                bm = st.session_state.get(_bm_ss_key) or {
+                    "ticker": benchmark, "label": benchmark,
+                    "sma50": None, "sma200": None,
+                    "golden_cross": None, "price": None,
+                    "hist": None, "perf_1y": None,
+                }
 
     if bm.get("golden_cross") is True:
         sma50_str  = f"{bm['sma50']:.2f}"  if bm["sma50"]  else "N/A"
