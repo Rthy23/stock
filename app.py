@@ -855,7 +855,7 @@ def main() -> None:
             with st.spinner(f"正在獲取 {ticker_input} 的完整數據…"):
                 fetched_info = get_stock_info(ticker_input)
                 fetched_hist = get_historical_data(ticker_input, period)
-            if not fetched_info or not fetched_info.get("price"):
+            if not fetched_info:
                 st.error(f"❌ 無法找到股票代碼「{ticker_input}」，請確認後重試。")
             else:
                 st.session_state["diag_stock_info"] = fetched_info
@@ -869,7 +869,7 @@ def main() -> None:
                 try:
                     if not st.session_state.get("diag_stock_info"):
                         fetched_info = get_stock_info(auto_ticker)
-                        if fetched_info and fetched_info.get("price"):
+                        if fetched_info:
                             st.session_state["diag_stock_info"] = fetched_info
                         else:
                             st.error(
@@ -892,8 +892,8 @@ def main() -> None:
         if not stock_info:
             st.info("👆 輸入股票代碼後按「診斷分析」，或在篩選結果中點擊代碼直接跳轉。")
 
-        if stock_info and stock_info.get("price"):
-            price  = stock_info["price"]
+        if stock_info:
+            price  = stock_info.get("price") or 0
             ticker = stock_info["ticker"]
 
             # Header + watchlist button

@@ -286,20 +286,39 @@ def parse_ibkr_screenshot(image_bytes: bytes, mime_type: str = "image/png") -> t
 
 
 # ── Stock data fetching ────────────────────────────────────────────────────────
+@st.cache_data(ttl=900)
 def get_stock_info(ticker: str) -> dict | None:
     try:
         stock = yf.Ticker(ticker)
         info  = stock.info
+
+        # Reject clearly invalid tickers (yfinance returns a 1-key dict for 404s)
+        if not info or len(info) <= 1:
+            return None
+
+        # Price: try info fields first, then fast_info as a reliable fallback.
+        # Recent yfinance (2.x) sometimes omits currentPrice/regularMarketPrice
+        # from the info dict during extended hours or for certain exchanges.
+        _price = (
+            info.get("currentPrice")
+            or info.get("regularMarketPrice")
+            or 0
+        )
+        if not _price:
+            try:
+                _price = float(stock.fast_info.last_price or 0)
+            except Exception:
+                _price = 0
+
         return {
             "ticker":          ticker,
-            "name":            info.get("longName", ticker),
+            "name":            info.get("longName") or info.get("shortName") or ticker,
             "sector":          info.get("sector", "N/A"),
             "market_cap":      info.get("marketCap", 0) or 0,
             "net_margin":      info.get("profitMargins", 0) or 0,
             "pe_ratio":        info.get("trailingPE", 0) or 0,
             "revenue_growth":  info.get("revenueGrowth", 0) or 0,
-            "price":           info.get("currentPrice",
-                                        info.get("regularMarketPrice", 0)) or 0,
+            "price":           _price,
             "52w_high":        info.get("fiftyTwoWeekHigh", 0) or 0,
             "52w_low":         info.get("fiftyTwoWeekLow", 0) or 0,
             "dividend_yield":  info.get("dividendYield", 0) or 0,
