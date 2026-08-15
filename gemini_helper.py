@@ -21,7 +21,8 @@ from tenacity import (
     RetryError,
 )
 
-_DEFAULT_MODEL = "gemini-2.0-flash"
+_DEFAULT_MODEL = "gemini-2.5-flash"
+_MODEL_FALLBACKS = ("gemini-2.5-flash", "gemini-3-flash-preview")
 _MAX_ATTEMPTS  = 3          # total tries
 _WAIT_MIN      = 4          # seconds before first retry
 _WAIT_MAX      = 60         # cap on backoff delay
@@ -46,6 +47,18 @@ def is_auth_error(e: Exception) -> bool:
     """Return True for 403 / API key errors."""
     msg = str(e).lower()
     return "403" in msg or "leaked" in msg or "api_key_invalid" in msg
+
+
+def is_model_unavailable(e: Exception) -> bool:
+    """Return True for an unavailable or retired Gemini model identifier."""
+    msg = str(e).lower()
+    return (
+        "404" in msg
+        or "not found" in msg
+        or "model_not_found" in msg
+        or "is not supported" in msg
+        or "unknown model" in msg
+    )
 
 
 def is_retryable(e: Exception) -> bool:
@@ -94,10 +107,27 @@ def call_gemini_raw(
     Use this for image / binary payloads or truly dynamic results.
     Returns the response text, or raises a descriptive exception.
     """
-    try:
-        return _do_call_with_retry(prompt, api_key, model_name)
-    except RetryError as re:
-        raise re.last_attempt.exception() from re  # unwrap tenacity wrapper
+    # Normalize retired model names here so stale callers cannot reintroduce
+    # the old gemini-2.0-flash 404.
+    if model_name in ("gemini-2.0-flash", "gemini-1.5-flash", _DEFAULT_MODEL):
+        candidates = list(_MODEL_FALLBACKS)
+    else:
+        candidates = [model_name] + [
+            candidate for candidate in _MODEL_FALLBACKS if candidate != model_name
+        ]
+
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            return _do_call_with_retry(prompt, api_key, candidate)
+        except RetryError as re:
+            last_error = re.last_attempt.exception() or re
+        except Exception as e:
+            last_error = e
+        if last_error is None or not is_model_unavailable(last_error):
+            raise last_error
+
+    raise last_error or RuntimeError("Gemini 沒有可用的模型。")
 
 
 # ── Cached wrapper (cache key = prompt + model) ───────────────────────────────

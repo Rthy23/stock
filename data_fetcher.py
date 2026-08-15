@@ -10,11 +10,20 @@ import json
 import os
 import base64
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from analysis import classify_sentiment
 from user_config import load_watchlist_cfg, save_watchlist_cfg
 
 _MODULE = "data_fetcher"
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def beijing_timestamp(with_seconds: bool = True) -> str:
+    """Return a consistent Beijing-time label for external data operations."""
+    fmt = "%Y-%m-%d %H:%M:%S" if with_seconds else "%Y-%m-%d %H:%M"
+    return datetime.now(BEIJING_TZ).strftime(fmt) + " 北京時間"
 
 def _err(func: str, e: Exception) -> str:
     return (f"MODULE_ERROR: [{_MODULE}] | FUNCTION: [{func}] "
@@ -188,10 +197,16 @@ def parse_ibkr_screenshot(image_bytes: bytes, mime_type: str = "image/png") -> t
         "https://generativelanguage.googleapis.com/v1beta",
     ).rstrip("/")
 
-    api_key = os.environ.get("AI_INTEGRATIONS_GEMINI_API_KEY", "")
+    api_key = (
+        os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("AI_INTEGRATIONS_GEMINI_API_KEY", "")
+    )
     if not api_key:
         try:
-            api_key = st.secrets.get("AI_INTEGRATIONS_GEMINI_API_KEY", "")
+            api_key = (
+                st.secrets.get("GEMINI_API_KEY", "")
+                or st.secrets.get("AI_INTEGRATIONS_GEMINI_API_KEY", "")
+            )
         except Exception:
             api_key = ""
 
@@ -202,8 +217,6 @@ def parse_ibkr_screenshot(image_bytes: bytes, mime_type: str = "image/png") -> t
             "AI_INTEGRATIONS_GEMINI_API_KEY = \"您的金鑰\""
         )
 
-    model    = "gemini-2.5-flash"
-    endpoint = f"{base_url}/models/{model}:generateContent"
     b64      = base64.b64encode(image_bytes).decode()
 
     prompt = (
@@ -233,17 +246,30 @@ def parse_ibkr_screenshot(image_bytes: bytes, mime_type: str = "image/png") -> t
     }
     headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
 
-    try:
-        resp = requests.post(endpoint, json=payload, headers=headers, timeout=90)
-    except requests.exceptions.Timeout:
-        raise ValueError("AI 解析逾時（90 秒），請檢查網路連線後重試。")
-    except requests.exceptions.ConnectionError as e:
-        raise ValueError(f"無法連接 Gemini 服務：{e}")
+    resp = None
+    model_errors = []
+    for model in ("gemini-2.5-flash", "gemini-3-flash-preview"):
+        endpoint = f"{base_url}/models/{model}:generateContent"
+        try:
+            candidate_resp = requests.post(
+                endpoint, json=payload, headers=headers, timeout=90
+            )
+        except requests.exceptions.Timeout:
+            raise ValueError("AI 解析逾時（90 秒），請檢查網路連線後重試。")
+        except requests.exceptions.ConnectionError as e:
+            raise ValueError(f"無法連接 Gemini 服務：{e}")
 
-    if not resp.ok:
-        raise ValueError(
-            f"Gemini API 回傳錯誤 {resp.status_code}：{resp.text[:300]}"
+        if candidate_resp.ok:
+            resp = candidate_resp
+            break
+        model_errors.append(
+            f"{model}: HTTP {candidate_resp.status_code} {candidate_resp.text[:180]}"
         )
+        if candidate_resp.status_code not in (404, 400):
+            break
+
+    if resp is None:
+        raise ValueError("Gemini API 回傳錯誤；已嘗試可用模型：\n" + "\n".join(model_errors))
 
     try:
         data = resp.json()

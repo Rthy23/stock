@@ -22,6 +22,7 @@ from data_fetcher import (
     get_stock_news, get_analyst_data, get_social_sentiment,
     get_combined_sentiment, get_vix_history, get_market_benchmark,
     parse_ibkr_screenshot, fmt_usd_hkd, _get_rate,
+    beijing_timestamp,
     MACRO_EVENTS, BENCHMARK_LABELS, SECTOR_ETFS,
 )
 
@@ -30,6 +31,16 @@ _MODULE = "ui_components"
 def _err(func: str, e: Exception) -> str:
     return (f"MODULE_ERROR: [{_MODULE}] | FUNCTION: [{func}] "
             f"| ERROR: {type(e).__name__}: {e}")
+
+
+def _render_external_timing(
+    label: str, loaded_at: str, analyzed_at: str | None = None
+) -> None:
+    """Show consistent Beijing-time checkpoints for externally fetched data."""
+    st.caption(
+        f"⏱ {label}資料載入：{loaded_at}｜"
+        f"分析完成：{analyzed_at or beijing_timestamp()}"
+    )
 
 
 # ── Session state init ─────────────────────────────────────────────────────────
@@ -558,21 +569,22 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
 def render_news_intelligence(ticker: str, company_name: str) -> None:
     """Fetch + display news with keyword sentiment and macro impact summary."""
     st.markdown("---")
-    _news_ts = datetime.now().strftime("%H:%M:%S")
     st.markdown(
-        f"### 📰 新聞與影響分析 (News Intelligence)"
-        f"<span style='color:#555; font-size:12px; margin-left:12px;'>"
-        f"⏱ 資料載入時間 {_news_ts}</span>",
+        "### 📰 新聞與影響分析 (News Intelligence)",
         unsafe_allow_html=True,
     )
     try:
         with st.spinner(f"正在獲取 {ticker} 最新新聞…"):
             raw_news = get_stock_news(ticker)
+        _news_loaded_at = beijing_timestamp()
     except Exception as e:
+        _news_loaded_at = beijing_timestamp()
+        _render_external_timing("新聞", _news_loaded_at)
         st.warning(f"⚠️ 新聞獲取發生錯誤：{e}")
         return
 
     if not raw_news:
+        _render_external_timing("新聞", _news_loaded_at)
         st.info("ℹ️ 暫時無法獲取近期新聞，請稍後重試。")
         return
 
@@ -606,10 +618,13 @@ def render_news_intelligence(ticker: str, company_name: str) -> None:
             })
 
         if not news_items:
+            _render_external_timing("新聞", _news_loaded_at)
             st.info("ℹ️ 暫時無法解析新聞內容，請稍後重試。")
             return
 
         result = news_impact_summary(news_items)
+        _news_analysis_at = beijing_timestamp()
+        _render_external_timing("新聞", _news_loaded_at, _news_analysis_at)
         if len(result) == 2:
             st.info(result[1])
             return
@@ -689,6 +704,7 @@ def render_news_intelligence(ticker: str, company_name: str) -> None:
             </div>""", unsafe_allow_html=True)
 
     except Exception as e:
+        _render_external_timing("新聞", _news_loaded_at)
         st.warning(f"⚠️ 新聞資料解析發生錯誤，部分數據可能無法顯示。({e})")
 
 
@@ -850,6 +866,7 @@ def render_portfolio_dashboard() -> None:
                 "pnl": pnl, "ret_pct": ret_pct,
                 "price_ok": cur_price > 0,
             })
+    _portfolio_loaded_at = beijing_timestamp()
     if fetch_errs:
         st.warning(
             f"⚠️ 以下股票報價取得失敗，盈虧計算可能不準確：{', '.join(fetch_errs)}"
@@ -859,6 +876,10 @@ def render_portfolio_dashboard() -> None:
     total_cur  = sum(r["cur_value"]  for r in rows)
     total_pnl  = total_cur - total_cost
     total_ret  = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+    _portfolio_analysis_at = beijing_timestamp()
+    _render_external_timing(
+        "持倉報價", _portfolio_loaded_at, _portfolio_analysis_at
+    )
 
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("持倉股票數",  f"{len(rows)} 支")
@@ -1058,12 +1079,17 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                     sentiment = {"combined": 50.0, "news_score": 50.0,
                                  "social_score": 50.0,
                                  "social_data": {"bull_count": 0, "bear_count": 0, "total": 0}}
+            _sentiment_loaded_at = beijing_timestamp()
 
             combined     = sentiment["combined"]
             news_score   = sentiment["news_score"]
             social_score = sentiment["social_score"]
             sd           = sentiment["social_data"]
             _check_sentiment_mutation("SPY", social_score)
+            _sentiment_analysis_at = beijing_timestamp()
+            _render_external_timing(
+                "市場情緒", _sentiment_loaded_at, _sentiment_analysis_at
+            )
 
             label_c, col_c = _score_to_label(combined)
             label_n, col_n = _score_to_label(news_score)
@@ -1154,10 +1180,12 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                     vix_df = get_vix_history()
                 except Exception:
                     vix_df = pd.DataFrame()
+            _vix_loaded_at = beijing_timestamp()
             st.plotly_chart(
                 plot_fear_timeline(vix_df, MACRO_EVENTS),
                 use_container_width=True, key="fear_timeline",
             )
+            _render_external_timing("VIX", _vix_loaded_at, beijing_timestamp())
 
         st.markdown("---")
     except Exception as e:

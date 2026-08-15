@@ -45,7 +45,9 @@ def ocr_with_gemini(image_bytes: bytes, api_key: str) -> tuple[list[dict], str |
       items     : list of {"fund_name": str, "percentage": float}
       error_msg : str if failed, None if successful
     """
-    from gemini_helper import is_retryable, is_quota_error, is_auth_error
+    from gemini_helper import (
+        is_retryable, is_quota_error, is_auth_error, is_model_unavailable,
+    )
     from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
     try:
         import google.generativeai as genai
@@ -55,15 +57,7 @@ def ocr_with_gemini(image_bytes: bytes, api_key: str) -> tuple[list[dict], str |
         img = Image.open(io.BytesIO(processed))
 
         genai.configure(api_key=api_key)
-        _MODEL_NAME = "gemini-1.5-flash"
-        try:
-            available = [m.name for m in genai.list_models()
-                         if "generateContent" in m.supported_generation_methods]
-            if not any(_MODEL_NAME in n for n in available):
-                _MODEL_NAME = available[0] if available else _MODEL_NAME
-        except Exception:
-            pass
-        model = genai.GenerativeModel(_MODEL_NAME)
+        model_names = ("gemini-2.5-flash", "gemini-3-flash-preview")
 
         prompt = (
             "You are an expert MPF (Mandatory Provident Fund) statement analyzer. "
@@ -74,16 +68,30 @@ def ocr_with_gemini(image_bytes: bytes, api_key: str) -> tuple[list[dict], str |
             "If a value is missing, omit that entry entirely."
         )
 
-        @retry(
-            retry=retry_if_exception(is_retryable),
-            wait=wait_exponential(multiplier=2, min=4, max=60),
-            stop=stop_after_attempt(3),
-            reraise=True,
-        )
-        def _call():
-            return model.generate_content([prompt, img])
+        resp = None
+        last_model_error = None
+        for model_name in model_names:
+            model = genai.GenerativeModel(model_name)
 
-        resp = _call()
+            @retry(
+                retry=retry_if_exception(is_retryable),
+                wait=wait_exponential(multiplier=2, min=4, max=60),
+                stop=stop_after_attempt(3),
+                reraise=True,
+            )
+            def _call():
+                return model.generate_content([prompt, img])
+
+            try:
+                resp = _call()
+                break
+            except Exception as model_error:
+                last_model_error = model_error
+                if not is_model_unavailable(model_error):
+                    raise
+
+        if resp is None:
+            raise last_model_error or RuntimeError("Gemini 沒有可用的 OCR 模型。")
         raw  = resp.text.strip()
 
         cleaned = re.sub(r"```[a-z]*\n?", "", raw).replace("```", "").strip()
@@ -212,7 +220,7 @@ def generate_quant_report(metrics: dict, api_key: str) -> str | None:
         f"請輸出純文字，不要使用 Markdown 格式，不要加標題。"
     )
     try:
-        return call_gemini_cached(prompt, api_key, "gemini-2.0-flash")
+        return call_gemini_cached(prompt, api_key)
     except Exception as e:
         err_str = str(e)
         print(_err("generate_quant_report", e))

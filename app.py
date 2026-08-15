@@ -30,6 +30,7 @@ from data_fetcher import (
     get_combined_sentiment, get_market_benchmark,
     save_watchlist, save_portfolio,
     get_factor_data, standardize_timezone,
+    beijing_timestamp,
     SCREENER_STOCKS, BENCHMARK_LABELS, SECTOR_ETFS,
 )
 from ui_components import (
@@ -606,6 +607,11 @@ def main() -> None:
                     "golden_cross": None, "price": None,
                     "hist": None, "perf_1y": None,
                 }
+        _bm_loaded_at = beijing_timestamp()
+        _bm_analysis_at = beijing_timestamp()
+        st.caption(
+            f"⏱ 大盤資料載入：{_bm_loaded_at}｜分析完成：{_bm_analysis_at}"
+        )
 
     if bm.get("golden_cross") is True:
         sma50_str  = f"{bm['sma50']:.2f}"  if bm["sma50"]  else "N/A"
@@ -744,7 +750,7 @@ def main() -> None:
         )
 
     st.sidebar.markdown("---")
-    st.sidebar.caption(f"更新時間：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    st.sidebar.caption(f"頁面更新：{beijing_timestamp(with_seconds=False)}")
 
     # Opportunity banner (all pages)
     render_opportunity_banner()
@@ -860,6 +866,11 @@ def main() -> None:
             with st.spinner(f"正在獲取 {ticker_input} 的完整數據…"):
                 fetched_info = get_stock_info(ticker_input)
                 fetched_hist = get_historical_data(ticker_input, period)
+            _diag_loaded_at = beijing_timestamp()
+            _diag_analysis_at = beijing_timestamp()
+            st.session_state["diag_timing"] = (
+                _diag_loaded_at, _diag_analysis_at
+            )
             if not fetched_info:
                 st.error(f"❌ 無法找到股票代碼「{ticker_input}」，請確認後重試。")
             else:
@@ -883,6 +894,11 @@ def main() -> None:
                             )
                     fetched_hist = get_historical_data(auto_ticker, period)
                     st.session_state["diag_hist"] = fetched_hist
+                    _diag_loaded_at = beijing_timestamp()
+                    _diag_analysis_at = beijing_timestamp()
+                    st.session_state["diag_timing"] = (
+                        _diag_loaded_at, _diag_analysis_at
+                    )
                 except Exception as _ae:
                     st.error(f"❌ 自動載入數據失敗：{_ae}")
             st.session_state["auto_fetch"] = False
@@ -900,6 +916,12 @@ def main() -> None:
         if stock_info:
             price  = stock_info.get("price") or 0
             ticker = stock_info["ticker"]
+            _diag_timing = st.session_state.get("diag_timing")
+            if _diag_timing:
+                st.caption(
+                    f"⏱ 個股資料載入：{_diag_timing[0]}｜"
+                    f"分析完成：{_diag_timing[1]}"
+                )
 
             # Header + watchlist button
             header_col, wl_col = st.columns([4, 1])
@@ -935,7 +957,7 @@ def main() -> None:
 
             # ── 決策速查表 ─────────────────────────────────────────────────────
             st.markdown("---")
-            _ts = datetime.now().strftime("%H:%M")
+            _quick_loaded_at = beijing_timestamp()
             _bm_ticker_q = st.session_state.get("benchmark", "VOO")
             _alpha_q = _is_out_q = None
             if hist is not None and not hist.empty:
@@ -959,6 +981,11 @@ def main() -> None:
                 _ad_q = get_analyst_data(ticker) or {}
             except Exception:
                 pass
+            _quick_analysis_at = beijing_timestamp()
+            st.caption(
+                f"⏱ 速查資料載入：{_quick_loaded_at}｜"
+                f"分析完成：{_quick_analysis_at}"
+            )
             _rec_q    = (_ad_q.get("recommendation") or "").lower()
             _is_buy_q = _rec_q in ("buy", "strong_buy")
 
@@ -982,7 +1009,8 @@ def main() -> None:
             st.markdown(
                 f"<div style='background:#0A0D1A; border:1px solid #2A2D3E; "
                 f"border-radius:8px; padding:10px 18px; margin-bottom:6px;'>"
-                f"<span style='color:#8B949E; font-size:11px;'>⚡ 決策速查表　更新時間 {_ts}</span>"
+                f"<span style='color:#8B949E; font-size:11px;'>"
+                f"⚡ 決策速查表　分析完成 {_quick_analysis_at}</span>"
                 f"<div style='display:flex; gap:40px; margin-top:8px;'>"
                 f"  <div><span style='color:#aaa; font-size:11px;'>大盤趨勢</span><br>"
                 f"    <span style='color:{_gc_color}; font-size:14px; font-weight:700;'>"
@@ -1319,10 +1347,15 @@ def main() -> None:
                 with st.spinner(f"載入 {bm_ticker} 數據…"):
                     bm_rs      = get_market_benchmark(bm_ticker, rs_period)
                     bm_hist_rs = bm_rs.get("hist")
+                _rs_loaded_at = beijing_timestamp()
 
                 if bm_hist_rs is not None and hist is not None and not hist.empty:
                     rs_fig, alpha_pct, is_out, stock_ret = plot_relative_strength(
                         hist, bm_hist_rs, ticker, bm_ticker
+                    )
+                    st.caption(
+                        f"⏱ 相對強弱資料載入：{_rs_loaded_at}｜"
+                        f"分析完成：{beijing_timestamp()}"
                     )
                     if rs_fig and alpha_pct is not None and stock_ret is not None:
                         a_sign = f"+{alpha_pct:.1f}" if alpha_pct >= 0 else f"{alpha_pct:.1f}"
@@ -1372,22 +1405,26 @@ def main() -> None:
                     else:
                         st.warning("⚠️ 日期區間對齊資料不足，無法繪製比較圖。")
                 else:
+                    st.caption(
+                        f"⏱ 相對強弱資料載入：{_rs_loaded_at}｜"
+                        f"分析完成：{beijing_timestamp()}"
+                    )
                     st.warning(f"⚠️ {bm_ticker} 基準數據暫時不可用，請稍後重試。")
             except Exception:
                 st.error("⚠️ 相對強弱計算異常，請稍後再試。")
 
             # Section 7: Analyst Consensus
             st.markdown("---")
-            _analyst_ts = datetime.now().strftime("%H:%M:%S")
-            st.markdown(
-                f"### 🏦 分析師共識評級 & 目標價分析"
-                f"<span style='color:#8B949E; font-size:12px; margin-left:12px;'>"
-                f"⏱ 資料載入時間 {_analyst_ts}</span>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("### 🏦 分析師共識評級 & 目標價分析")
             try:
                 with st.spinner("載入分析師數據…"):
                     ad = get_analyst_data(ticker)
+                _analyst_loaded_at = beijing_timestamp()
+                _analyst_analysis_at = beijing_timestamp()
+                st.caption(
+                    f"⏱ 分析師資料載入：{_analyst_loaded_at}｜"
+                    f"分析完成：{_analyst_analysis_at}"
+                )
                 if not ad:
                     st.caption("⏳ 分析師數據暫時不可用，請稍後再試。")
                 else:
@@ -1480,6 +1517,7 @@ def main() -> None:
                 with st.spinner(f"載入 {_sel_period} 歷史數據…"):
                     _comp_hist = get_historical_data(ticker, _yf_period)
                     _bm_data_c = get_market_benchmark(_bm_ticker_c, _yf_period)
+                _comparison_loaded_at = beijing_timestamp()
                 if _comp_hist is not None and not _comp_hist.empty:
                     _cc = _comp_hist["Close"].dropna()
                     _stock_ret = float((_cc.iloc[-1] / _cc.iloc[0] - 1) * 100)
@@ -1537,6 +1575,10 @@ def main() -> None:
                     )
                     st.plotly_chart(_fig_norm, use_container_width=True,
                                     key=f"norm_chart_{ticker}_{_sel_period}")
+                    st.caption(
+                        f"⏱ 歷史／基準資料載入：{_comparison_loaded_at}｜"
+                        f"分析完成：{beijing_timestamp()}"
+                    )
                     st.markdown("**區間細分表現**")
                     _sub_periods = {"1 週": 5, "1 個月": 21, "3 個月": 63}
                     _sub_tabs = st.tabs(list(_sub_periods.keys()))
@@ -1585,11 +1627,22 @@ def main() -> None:
                              type="primary", use_container_width=True):
                     with st.spinner(f"正在計算 {ticker} 七大因子…"):
                         _fd = get_factor_data(ticker)
+                        _factor_loaded_at = beijing_timestamp()
                         _f7 = calculate_seven_factors(stock_info, hist, _fd)
+                        _factor_analysis_at = beijing_timestamp()
                     st.session_state[_f7_key]      = _f7
                     st.session_state[_f7_data_key] = _fd
+                    st.session_state[f"{_f7_key}_timing"] = (
+                        _factor_loaded_at, _factor_analysis_at
+                    )
                 _f7 = st.session_state.get(_f7_key)
                 if _f7:
+                    _factor_timing = st.session_state.get(f"{_f7_key}_timing")
+                    if _factor_timing:
+                        st.caption(
+                            f"⏱ 因子資料載入：{_factor_timing[0]}｜"
+                            f"分析完成：{_factor_timing[1]}"
+                        )
                     _comp   = _f7.get("composite", 0)
                     _signal = _f7.get("signal", "HOLD")
                     _sig_colors = {
@@ -1720,7 +1773,10 @@ def main() -> None:
                             if _f7_rpt == "__QUOTA__":
                                 render_quota_error()
                             elif _f7_rpt.startswith("❌"):
-                                render_auth_error() if "Key" in _f7_rpt else st.error(_f7_rpt)
+                                if "Key" in _f7_rpt:
+                                    render_auth_error()
+                                else:
+                                    st.error(_f7_rpt)
                             else:
                                 st.markdown(
                                     f"<div style='background:#1B2A3D;border-left:4px solid #1F6FEB;"
@@ -1747,7 +1803,10 @@ def main() -> None:
                         if _report == "__QUOTA__":
                             render_quota_error()
                         elif _report.startswith("❌"):
-                            render_auth_error() if "Key" in _report else st.error(_report)
+                            if "Key" in _report:
+                                render_auth_error()
+                            else:
+                                st.error(_report)
                         else:
                             st.markdown(
                                 f"<div style='background:#1B2A3D;border-left:4px solid #1F6FEB;"
@@ -1805,7 +1864,10 @@ def main() -> None:
                     if _pf_report == "__QUOTA__":
                         render_quota_error()
                     elif _pf_report.startswith("❌"):
-                        render_auth_error() if "Key" in _pf_report else st.error(_pf_report)
+                        if "Key" in _pf_report:
+                            render_auth_error()
+                        else:
+                            st.error(_pf_report)
                     else:
                         st.markdown(
                             f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
@@ -1914,8 +1976,12 @@ def main() -> None:
                             pass
                         time.sleep(0.05)
                     used_params = st.session_state.get("screen_params", params)
+                    _screen_loaded_at = beijing_timestamp()
                     results     = screen_stocks(stocks_data, *used_params)
                     st.session_state["results"] = results
+                    st.session_state["screen_timing"] = (
+                        _screen_loaded_at, beijing_timestamp()
+                    )
                 except Exception as _se:
                     screen_err = str(_se)
                     st.session_state["results"] = []
@@ -1928,6 +1994,12 @@ def main() -> None:
 
             if st.session_state.get("results"):
                 results = st.session_state["results"]
+                _screen_timing = st.session_state.get("screen_timing")
+                if _screen_timing:
+                    st.caption(
+                        f"⏱ 篩選資料載入：{_screen_timing[0]}｜"
+                        f"分析完成：{_screen_timing[1]}"
+                    )
                 st.success(f"✅ 篩選完成！找到 **{len(results)}** 支符合條件的股票")
 
                 hcols = st.columns([1, 2.5, 1.5, 1.2, 1, 1, 1, 0.8, 0.8])
@@ -2360,7 +2432,10 @@ def main() -> None:
                         if _bt_report == "__QUOTA__":
                             render_quota_error()
                         elif _bt_report.startswith("❌"):
-                            render_auth_error() if "Key" in _bt_report else st.error(_bt_report)
+                            if "Key" in _bt_report:
+                                render_auth_error()
+                            else:
+                                st.error(_bt_report)
                         else:
                             st.markdown(
                                 f"<div style='background:#1B2A3D; border-left:4px solid #1F6FEB; "
