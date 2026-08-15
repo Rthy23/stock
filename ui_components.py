@@ -25,6 +25,7 @@ from data_fetcher import (
     beijing_timestamp,
     MACRO_EVENTS, BENCHMARK_LABELS, SECTOR_ETFS,
 )
+from navigation import navigate_to_ticker
 
 _MODULE = "ui_components"
 
@@ -89,23 +90,6 @@ def navigate_to_diagnosis(stock_info: dict) -> None:
         st.rerun()
     except Exception as e:
         print(_err("navigate_to_diagnosis", e))
-
-
-def navigate_to_ticker(ticker: str) -> None:
-    """Select a ticker from any module and open the shared diagnosis flow."""
-    try:
-        normalized = str(ticker or "").strip().upper()
-        if not normalized:
-            return
-        st.session_state["selected_ticker"] = normalized
-        st.session_state["diag_ticker"] = normalized
-        st.session_state["diag_stock_info"] = None
-        st.session_state["diag_hist"] = None
-        st.session_state["auto_fetch"] = True
-        st.session_state["nav_page"] = "🔬 個股診斷 (Micro)"
-        st.rerun()
-    except Exception as e:
-        print(_err("navigate_to_ticker", e))
 
 
 # ── Sentiment mutation alert ───────────────────────────────────────────────────

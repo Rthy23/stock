@@ -1,0 +1,61 @@
+ImportError: cannot import name 'navigate_to_ticker' from 'ui_components' 
+
+(/mount/src/stock/ui_components.py)
+
+────────────────────── Traceback (most recent call last) ───────────────────────
+
+  /home/adminuser/venv/lib/python3.14/site-packages/streamlit/runtime/scriptru  
+
+  nner/exec_code.py:136 in exec_func_with_error_handling                        
+
+                                                                                
+
+  /home/adminuser/venv/lib/python3.14/site-packages/streamlit/runtime/scriptru  
+
+  nner/script_runner.py:816 in code_to_exec                                     
+
+                                                                                
+
+  /mount/src/stock/app.py:48 in <module>                                        
+
+                                                                                
+
+      45 import backtest_engine as be                                           
+
+      46 from mpf_assistant import render_mpf_page                              
+
+      47 from kol_whitelist import render_kol_section                           
+
+  ❱   48 from pages.sector_analysis import render_sector_analysis_page          
+
+      49 from pages.portfolio_allocation import render_portfolio_allocation_pa  
+
+      50 from ocr_module import generate_quant_report                           
+
+      51 from notifier import (                                                 
+
+                                                                                
+
+  /mount/src/stock/pages/sector_analysis.py:13 in <module>                      
+
+                                                                                
+
+     10 import yfinance as yf                                                   
+
+     11                                                                         
+
+     12 from data_fetcher import beijing_timestamp                              
+
+  ❱  13 from ui_components import navigate_to_ticker                            
+
+     14                                                                         
+
+     15                                                                         
+
+     16 SECTOR_DATA: dict[str, dict] = {                                        
+
+────────────────────────────────────────────────────────────────────────────────
+
+ImportError: cannot import name 'navigate_to_ticker' from 'ui_components' 
+
+(/mount/src/stock/ui_components.py)

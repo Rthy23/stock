@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 from data_fetcher import beijing_timestamp
-from ui_components import navigate_to_ticker
+from navigation import navigate_to_ticker
 
 
 SECTOR_DATA: dict[str, dict] = {

@@ -18,7 +18,7 @@ from typing import Dict, List, Tuple
 import streamlit as st
 from user_config import load_kol_whitelist
 from kol_config import ANALYST_DIRECTORY
-from ui_components import navigate_to_ticker
+from navigation import navigate_to_ticker
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 1. WHITELIST — 手工篩選高信譽分析師
