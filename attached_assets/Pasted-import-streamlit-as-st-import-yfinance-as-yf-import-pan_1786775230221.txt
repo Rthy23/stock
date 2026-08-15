@@ -1,0 +1,162 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import plotly.express as px
+
+# 1. 國際市場與美股 ADR / ETF 數據庫
+GLOBAL_MARKETS = {
+    "台灣 (Taiwan)": {
+        "etf": "EWT",
+        "region_code": "TW",
+        "description": "全球半導體與 AI 供應鏈核心，擁有世界頂級晶片代工與封測聚落。",
+        "top_etfs": ["EWT (iShares MSCI Taiwan ETF)"],
+        "top_stocks": [
+            {"ticker": "TSM", "name": "台積電 (TSMC)", "desc": "全球晶圓代工龍頭，AI 晶片獨家供應商"},
+            {"ticker": "UMC", "name": "聯電 (UMC)", "desc": "成熟製程晶圓代工大廠"},
+            {"ticker": "ASX", "name": "日月光投控", "desc": "全球半導體封測龍頭"}
+        ]
+    },
+    "日本 (Japan)": {
+        "etf": "EWJ",
+        "region_code": "JP",
+        "description": "受惠企業治理改革與巴菲特加碼，製造業巨頭與高金融權重復甦。",
+        "top_etfs": ["EWJ (MSCI Japan ETF)", "DXJ (WisdomTree Japan Hedged)"],
+        "top_stocks": [
+            {"ticker": "TM", "name": "豐田汽車 (Toyota)", "desc": "全球銷量第一汽車巨頭"},
+            {"ticker": "SONY", "name": "索尼 (Sony)", "desc": "娛樂、遊戲 (PlayStation) 與感測器龍頭"},
+            {"ticker": "MUFG", "name": "三菱日聯金融", "desc": "日本最大金融集團，受惠升息週期"}
+        ]
+    },
+    "歐洲 (Europe)": {
+        "etf": "FEZ",
+        "region_code": "EU",
+        "description": "擁有生技醫療、頂級半導體設備與全球奢侈品龍頭企業。",
+        "top_etfs": ["FEZ (Euro Stoxx 50 ETF)", "VGK (Vanguard FTSE Europe)"],
+        "top_stocks": [
+            {"ticker": "NVO", "name": "諾和諾德 (Novo Nordisk)", "desc": "全球減肥藥 (Wegovy) 與胰島素龍頭"},
+            {"ticker": "ASML", "name": "阿斯麥 (ASML)", "desc": "全球唯一頂級 EUV 光刻機製造商"},
+            {"ticker": "SAP", "name": "SAP SE", "desc": "歐洲最大企業級雲端軟體巨頭"}
+        ]
+    },
+    "中國 (China)": {
+        "etf": "MCHI",
+        "region_code": "CN",
+        "description": "聚焦互聯網科技巨頭、消費出海與新能源汽車龍頭。",
+        "top_etfs": ["MCHI (iShares MSCI China)", "KWEB (KraneShares China Internet)"],
+        "top_stocks": [
+            {"ticker": "BABA", "name": "阿里巴巴 (Alibaba)", "desc": "中國電商與雲端運算龍頭"},
+            {"ticker": "PDD", "name": "拼多多 (PDD)", "desc": "電商巨頭，旗下的 Temu 席捲全球市場"},
+            {"ticker": "BYDDY", "name": "比亞迪 (BYD)", "desc": "全球新能源汽車與電池銷量冠軍"}
+        ]
+    },
+    "韓國 (South Korea)": {
+        "etf": "EWY",
+        "region_code": "KR",
+        "description": "全球記憶體晶片 (HBM) 核心重鎮與高成長跨境電商。",
+        "top_etfs": ["EWY (iShares MSCI South Korea ETF)"],
+        "top_stocks": [
+            {"ticker": "CPNG", "name": "Coupang", "desc": "韓國最大電商平台 (韓國亞馬遜)"},
+            {"ticker": "KB", "name": "KB 金融集團", "desc": "韓國龍頭商業銀行，享高股息收益"}
+        ]
+    },
+    "香港 (Hong Kong)": {
+        "etf": "EWH",
+        "region_code": "HK",
+        "description": "亞洲金融樞紐，以高股息金融、保險與地產龍頭為主。",
+        "top_etfs": ["EWH (iShares MSCI Hong Kong ETF)"],
+        "top_stocks": [
+            {"ticker": "AAGIY", "name": "友邦保險 (AIA)", "desc": "亞太區最大泛亞獨立壽險集團"},
+            {"ticker": "HKXCY", "name": "港交所 (HKEX)", "desc": "香港證券交易所獨家營運商"}
+        ]
+    }
+}
+
+# 2. 緩存抓取各國 ETF 與 SPY 績效
+@st.cache_data(ttl=3600)
+def fetch_global_performance():
+    tickers = [info["etf"] for info in GLOBAL_MARKETS.values()]
+    tickers.append("SPY") # 美股基準
+    
+    df = yf.download(tickers, period="1y")["Close"]
+    latest = df.iloc[-1]
+    
+    m1 = (latest / df.iloc[-21] - 1) * 100
+    m3 = (latest / df.iloc[-63] - 1) * 100
+    y1 = (latest / df.iloc[0] - 1) * 100
+    
+    rows = []
+    for region, info in GLOBAL_MARKETS.items():
+        etf = info["etf"]
+        rows.append({
+            "國家/區域": region,
+            "代表 ETF": etf,
+            "近1個月 (%)": round(m1[etf], 2),
+            "近3個月 (%)": round(m3[etf], 2),
+            "近1年 (%)": round(y1[etf], 2)
+        })
+        
+    perf_df = pd.DataFrame(rows)
+    spy_m1 = round(m1["SPY"], 2)
+    return perf_df, spy_m1
+
+# 3. Streamlit UI 頁面
+def render_global_page():
+    st.title("🌐 全球市場與美股 ADR 精選標的")
+    st.caption("在以美股為主體的配置下，輕鬆透過美股 ADR 與國家 ETF 佈局歐洲、日本、台灣、韓國、中國與香港。")
+
+    with st.spinner("讀取全球市場即時行情..."):
+        try:
+            perf_df, spy_m1 = fetch_global_performance()
+        except Exception as e:
+            st.error(f"數據抓取失敗: {e}")
+            return
+
+    # 1. 績效排行榜
+    timeframe = st.radio("排序時間範圍", ["近1個月 (%)", "近3個月 (%)", "近1年 (%)"], horizontal=True)
+    sorted_df = perf_df.sort_values(by=timeframe, ascending=False).reset_index(drop=True)
+
+    fig = px.bar(
+        sorted_df,
+        x=timeframe,
+        y="國家/區域",
+        orientation="h",
+        color=timeframe,
+        color_continuous_scale="Viridis",
+        title=f"全球主要市場 ETF 報酬率表現 ({timeframe})"
+    )
+    fig.update_layout(yaxis={"categoryorder": "total ascending"})
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+
+    # 2. 各國市場深度探索與標的推薦
+    st.subheader("🔍 分區國際市場與精選美股標的 (ADR / ETF)")
+    
+    selected_region = st.selectbox("選擇要探索的國家/地區", list(GLOBAL_MARKETS.keys()))
+    region_info = GLOBAL_MARKETS[selected_region]
+
+    st.info(f"**市場簡介：** {region_info['description']}")
+
+    col_etf, col_stock = st.columns([1, 2])
+
+    with col_etf:
+        st.markdown("### 🧺 國家/區域 ETF")
+        for etf in region_info["top_etfs"]:
+            st.code(etf, language=None)
+            
+    with col_stock:
+        st.markdown("### 📈 美股市場上市之精選個股 (ADR)")
+        for item in region_info["top_stocks"]:
+            ticker = item["ticker"]
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                st.write(f"**{item['name']} (`{ticker}`)**")
+                st.caption(item["desc"])
+            with c2:
+                if st.button("個股診斷", key=f"global_{ticker}"):
+                    st.session_state["target_ticker"] = ticker
+                    st.session_state["active_tab"] = "個股診斷"
+                    st.rerun()
+
+if __name__ == "__main__":
+    render_global_page()

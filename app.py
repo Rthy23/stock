@@ -47,6 +47,7 @@ from mpf_assistant import render_mpf_page
 from kol_whitelist import render_kol_section
 from pages.sector_analysis import render_sector_analysis_page
 from pages.portfolio_allocation import render_portfolio_allocation_page
+from pages.global_markets import render_global_markets_page
 from ocr_module import generate_quant_report
 from notifier import (
     run_all_checks, get_current_prices,
@@ -358,6 +359,7 @@ def main() -> None:
     _PAGES = [
         "📡 總體市場 (Macro)",
         "📊 板塊分析 (Sector)",
+        "🌐 國際市場 (Global)",
         "🧭 資產配置 (Allocation)",
         "🔬 個股診斷 (Micro)",
         "💼 我的持倉",
@@ -851,13 +853,19 @@ def main() -> None:
         render_sector_analysis_page()
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 3 — Defensive allocation
+    # PAGE 3 — Global markets and ADR watchlist
+    # ══════════════════════════════════════════════════════════════════════════
+    elif page == "🌐 國際市場 (Global)":
+        render_global_markets_page()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PAGE 4 — Defensive allocation
     # ══════════════════════════════════════════════════════════════════════════
     elif page == "🧭 資產配置 (Allocation)":
         render_portfolio_allocation_page()
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 4 — Stock Diagnosis
+    # PAGE 5 — Stock Diagnosis
     # ══════════════════════════════════════════════════════════════════════════
     elif page == "🔬 個股診斷 (Micro)":
         st.title("🔬 個股診斷 (Micro)")
