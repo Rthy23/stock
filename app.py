@@ -2690,9 +2690,9 @@ def main() -> None:
     elif page == "🛡️ MPF 智投":
         render_mpf_page()
 
-
-if __name__ == "__main__":
-    try:
-        main()
-    except Exception as _top_err:
-        st.error(f"❌ 程式初始化失敗，請重新整理頁面。（{_top_err}）")
+# Streamlit executes this file as the application entry point.  Keep the
+# module free of standalone Python/Uvicorn server startup logic.
+try:
+    main()
+except Exception as _top_err:
+    st.error(f"❌ 程式初始化失敗，請重新整理頁面。（{_top_err}）")
