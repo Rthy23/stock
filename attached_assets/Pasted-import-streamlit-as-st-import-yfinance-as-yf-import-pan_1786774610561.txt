@@ -1,0 +1,134 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import plotly.express as px
+
+# 1. 緩存抓取總體市場指標 (10Y Yield, VIX, SPY)
+@st.cache_data(ttl=3600)
+def fetch_macro_indicators():
+    # ^TNX: 10-Year Treasury Note Yield
+    # ^VIX: CBOE Volatility Index
+    # SPY: SPDR S&P 500 ETF
+    tickers = ["^TNX", "^VIX", "SPY"]
+    df = yf.download(tickers, period="1y")["Close"]
+    
+    tnx_latest = float(df["^TNX"].iloc[-1])
+    vix_latest = float(df["^VIX"].iloc[-1])
+    spy_latest = float(df["SPY"].iloc[-1])
+    
+    # 計算 SPY 距離 200 日均線位置 (判斷大盤趨勢)
+    spy_ma200 = float(df["SPY"].rolling(200).mean().iloc[-1])
+    spy_above_ma200 = spy_latest > spy_ma200
+    
+    return {
+        "tnx": round(tnx_latest, 2),
+        "vix": round(vix_latest, 2),
+        "spy_price": round(spy_latest, 2),
+        "spy_ma200": round(spy_ma200, 2),
+        "spy_above_ma200": spy_above_ma200
+    }
+
+# 2. 資產配置邏輯判定模型
+def calculate_allocation(macro, user_risk_profile="穩健型"):
+    vix = macro["vix"]
+    spy_bull = macro["spy_above_ma200"]
+    tnx = macro["tnx"]
+    
+    # 根據 VIX 與 200MA 判斷市場狀態
+    if vix > 25:
+        regime = "高風險恐慌期 (High Risk / Offense Guard)"
+        desc = "市場恐慌指數偏高，建議提高現金與美債定存比例，鎖定無風險收益，留存現金等待拉回買點。"
+        stocks_pct, etf_pct, cash_pct = 15, 35, 50
+    elif not spy_bull:
+        regime = "空頭/震盪調整期 (Bear / Correction Market)"
+        desc = "大盤跌破 200 日均線，市場動能轉弱。建議降低高波動個股，以核心大盤 ETF 與定存為主。"
+        stocks_pct, etf_pct, cash_pct = 20, 45, 35
+    elif vix < 15 and spy_bull:
+        regime = "多頭牛市期 (Bullish Risk-On)"
+        desc = "市場情緒樂觀且趨勢向上。可適度提高成長型個股與權重，降低閒置現金比重。"
+        stocks_pct, etf_pct, cash_pct = 40, 45, 15
+    else:
+        regime = "溫和震盪期 (Neutral / Balanced Market)"
+        desc = "市場處於標準均衡狀態。維持經典穩健配置，均衡佈局個股、ETF 與現金流。"
+        stocks_pct, etf_pct, cash_pct = 30, 50, 20
+        
+    return regime, desc, stocks_pct, etf_pct, cash_pct
+
+# 3. Streamlit UI 頁面渲染
+def render_portfolio_page():
+    st.title("🛡️ 穩健型資產配置策略與金流規劃")
+    st.caption("結合美股總體市場即時數據（10年期美債收益率、VIX 恐慌指數、S&P 500 趨勢），動態計算最佳資產比例。")
+
+    with st.spinner("正在讀取總體市場宏觀數據..."):
+        try:
+            macro = fetch_macro_indicators()
+        except Exception as e:
+            st.error(f"宏觀數據讀取失敗: {e}")
+            return
+
+    # 展示宏觀指標 Widget
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("10年期美債收益率", f"{macro['tnx']}%")
+    m2.metric("VIX 恐慌指數", f"{macro['vix']}")
+    m3.metric("S&P 500 (SPY)", f"${macro['spy_price']}")
+    m4.metric("大盤技術位階", "多頭 (200MA之上)" if macro['spy_above_ma200'] else "空頭/修正 (200MA之下)")
+
+    st.markdown("---")
+
+    # 用戶輸入區域
+    col_input, col_info = st.columns([1, 2])
+    with col_input:
+        st.subheader("💰 投資金流設定")
+        total_investment = st.number_input("請輸入預計投入總金額 (USD)", min_value=1000, value=50000, step=5000)
+        risk_profile = st.selectbox("投資風格偏好", ["穩健保守型", "平衡型", "積極成長型"])
+
+    # 計算動態配置
+    regime, desc, stocks_pct, etf_pct, cash_pct = calculate_allocation(macro, risk_profile)
+
+    with col_info:
+        st.subheader(f"📊 當前市場判定：{regime}")
+        st.info(desc)
+
+    # 金額計算
+    cash_amt = total_investment * (cash_pct / 100)
+    etf_amt = total_investment * (etf_pct / 100)
+    stocks_amt = total_investment * (stocks_pct / 100)
+
+    st.markdown("---")
+    st.subheader("🎯 建議金額分配與標的推薦")
+
+    c1, c2 = st.columns([1, 1])
+
+    with c1:
+        # 繪製圓餅圖
+        alloc_df = pd.DataFrame({
+            "資產類別": ["美元定存 / 短債 (Cash)", "美股指數/行業 ETF (Funds)", "精選美股個股 (Stocks)"],
+            "金額 (USD)": [cash_amt, etf_amt, stocks_amt]
+        })
+        fig = px.pie(
+            alloc_df, 
+            values="金額 (USD)", 
+            names="資產類別", 
+            title="資產配置比例圖",
+            color_discrete_sequence=["#2ecc71", "#3498db", "#e74c3c"]
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c2:
+        st.write("### 💵 1. 美元定存 / 美債基金 (Cash & Short-Term Bills)")
+        st.write(f"**建議配置：{cash_pct}% (${cash_amt:,.0f} USD)**")
+        st.caption("用途：鎖定無風險利息收益，作為市場重挫時抄底的預備金。")
+        st.markdown("- **推薦標的**：美股短債 ETF `SGOV` / `BIL`，或券商高利活存 (APY 4%+)。")
+
+        st.write("### 🧺 2. 美股指數與行業 ETF (Core Funds)")
+        st.write(f"**建議配置：{etf_pct}% (${etf_amt:,.0f} USD)**")
+        st.caption("用途：跟隨美股長期經濟成長，分散單一公司營運風險。")
+        st.markdown("- **推薦標的**：大盤 `VOO` (S&P500), `QQQ` (納斯達克100) 或強勢行業 ETF (如 `XLK`)。")
+
+        st.write("### 📈 3. 精選美股個股 (Growth Stocks)")
+        st.write(f"**建議配置：{stocks_pct}% (${stocks_amt:,.0f} USD)**")
+        st.caption("用途：搭配網站『7-Factor 診斷模型』選出高 Alpha 潛力個股，獲取超額收益。")
+        st.markdown("- **推薦標的**：通過 7-Factor 評分大於 75 分之強勢龍頭股。")
+
+if __name__ == "__main__":
+    render_portfolio_page()
