@@ -45,6 +45,8 @@ from ui_components import (
 import backtest_engine as be
 from mpf_assistant import render_mpf_page
 from kol_whitelist import render_kol_section
+from pages.sector_analysis import render_sector_analysis_page
+from pages.portfolio_allocation import render_portfolio_allocation_page
 from ocr_module import generate_quant_report
 from notifier import (
     run_all_checks, get_current_prices,
@@ -355,6 +357,8 @@ def main() -> None:
 
     _PAGES = [
         "📡 總體市場 (Macro)",
+        "📊 板塊分析 (Sector)",
+        "🧭 資產配置 (Allocation)",
         "🔬 個股診斷 (Micro)",
         "💼 我的持倉",
         "📊 美股回測",
@@ -841,17 +845,31 @@ def main() -> None:
         render_kol_section(api_key=_api_key)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PAGE 2 — Stock Diagnosis
+    # PAGE 2 — Sector rotation
+    # ══════════════════════════════════════════════════════════════════════════
+    elif page == "📊 板塊分析 (Sector)":
+        render_sector_analysis_page()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PAGE 3 — Defensive allocation
+    # ══════════════════════════════════════════════════════════════════════════
+    elif page == "🧭 資產配置 (Allocation)":
+        render_portfolio_allocation_page()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # PAGE 4 — Stock Diagnosis
     # ══════════════════════════════════════════════════════════════════════════
     elif page == "🔬 個股診斷 (Micro)":
         st.title("🔬 個股診斷 (Micro)")
 
+        _selected_ticker = st.session_state.get("selected_ticker", "")
+        _diag_default = st.session_state.get("diag_ticker", "") or _selected_ticker
         col_input, col_period, col_btn = st.columns([2, 1, 1])
         with col_input:
             ticker_input = st.text_input(
                 "輸入股票代碼",
                 placeholder="例：AAPL  MSFT  GOOGL",
-                value=st.session_state.get("diag_ticker", ""),
+                value=_diag_default,
             ).upper().strip()
         with col_period:
             period = st.selectbox("歷史數據", ["1y", "6mo", "2y", "5y"], index=0)
@@ -861,6 +879,7 @@ def main() -> None:
 
         if ticker_input:
             st.session_state["diag_ticker"] = ticker_input
+            st.session_state["selected_ticker"] = ticker_input
 
         if ticker_input and analyze_btn:
             with st.spinner(f"正在獲取 {ticker_input} 的完整數據…"):
@@ -880,7 +899,10 @@ def main() -> None:
                 st.session_state["auto_fetch"]      = False
 
         if st.session_state.get("auto_fetch"):
-            auto_ticker = st.session_state.get("diag_ticker", "")
+            auto_ticker = (
+                st.session_state.get("diag_ticker", "")
+                or st.session_state.get("selected_ticker", "")
+            )
             with st.spinner(f"正在載入 {auto_ticker} 的完整數據…"):
                 try:
                     if not st.session_state.get("diag_stock_info"):
@@ -2147,6 +2169,18 @@ def main() -> None:
             st.markdown("<br>", unsafe_allow_html=True)
             st.markdown("### 🎯 回測參數")
 
+            _selected_for_backtest = st.session_state.get("selected_ticker", "")
+            if _selected_for_backtest:
+                st.caption(
+                    f"目前共用選取標的：**{_selected_for_backtest}**"
+                )
+                if st.button(
+                    f"↔ 將 {_selected_for_backtest} 帶入回測",
+                    key="use_selected_ticker_backtest",
+                ):
+                    st.session_state["bt_tickers"] = _selected_for_backtest
+                    st.rerun()
+
             with st.form("backtest_form_v2"):
                 row1a, row1b, row1c = st.columns([4, 1, 2])
                 with row1a:
@@ -2205,6 +2239,8 @@ def main() -> None:
                 tickers_raw = [t.strip().upper() for t in raw_tickers.split(",") if t.strip()]
                 tickers = tickers_raw[:5]
                 st.session_state["bt_tickers"]   = raw_tickers
+                if tickers:
+                    st.session_state["selected_ticker"] = tickers[0]
                 st.session_state["bt_years"]     = years
                 st.session_state["bt_benchmark"] = benchmark
                 st.session_state["bt_strategy"]  = strategy_mode

@@ -7,7 +7,7 @@ A Streamlit-based US stock screening and trading dashboard with technical analys
 ## Architecture
 
 - **Framework**: Streamlit (Python)
-- **Port**: 5000
+- **Ports**: 8501 by default in `.streamlit/config.toml`; Replit Webview workflow overrides to 5000
 - **Entry Point**: `app.py`
 
 ## Key Files
@@ -22,7 +22,10 @@ A Streamlit-based US stock screening and trading dashboard with technical analys
 - `mpf_strategy.py` — RS+SMA strategy engine, dual pie charts, ETF history comparison, defensive allocation
 - `ocr_module.py` — Gemini AI OCR for MPF statement parsing + quant report generation
 - `kol_whitelist.py` — KOL whitelist scoring engine: 8 curated analysts, 3-dimensional scoring (consistency × argument quality × recency), Gemini AI structured consensus report
-- `.streamlit/config.toml` — Streamlit server config (host: 0.0.0.0, port: 5000)
+- `kol_config.py` — Expanded 20+ analyst/institution directory with style tags and representative tickers
+- `pages/sector_analysis.py` — Hourly-cached 11-sector ETF rotation analysis and diagnosis handoff
+- `pages/portfolio_allocation.py` — Hourly-cached macro risk classification and dynamic allocation suggestions
+- `.streamlit/config.toml` — Streamlit server config (host: 0.0.0.0, default port: 8501)
 - `requirements.txt` — Python dependencies
 
 ## Dependencies

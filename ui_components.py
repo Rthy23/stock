@@ -53,6 +53,7 @@ def init_session() -> None:
             "screening":         lambda: False,
             "results":           lambda: None,
             "diag_ticker":       lambda: "",
+            "selected_ticker":   lambda: "",
             "diag_stock_info":   lambda: None,
             "diag_hist":         lambda: None,
             "diag_period":       lambda: "1y",
@@ -80,6 +81,7 @@ def navigate_to_diagnosis(stock_info: dict) -> None:
     """Jump to diagnosis page and flag auto-fetch for historical data."""
     try:
         st.session_state["diag_ticker"]      = stock_info["ticker"]
+        st.session_state["selected_ticker"]  = stock_info["ticker"]
         st.session_state["diag_stock_info"]  = stock_info
         st.session_state["diag_hist"]        = None
         st.session_state["auto_fetch"]       = True
@@ -87,6 +89,23 @@ def navigate_to_diagnosis(stock_info: dict) -> None:
         st.rerun()
     except Exception as e:
         print(_err("navigate_to_diagnosis", e))
+
+
+def navigate_to_ticker(ticker: str) -> None:
+    """Select a ticker from any module and open the shared diagnosis flow."""
+    try:
+        normalized = str(ticker or "").strip().upper()
+        if not normalized:
+            return
+        st.session_state["selected_ticker"] = normalized
+        st.session_state["diag_ticker"] = normalized
+        st.session_state["diag_stock_info"] = None
+        st.session_state["diag_hist"] = None
+        st.session_state["auto_fetch"] = True
+        st.session_state["nav_page"] = "🔬 個股診斷 (Micro)"
+        st.rerun()
+    except Exception as e:
+        print(_err("navigate_to_ticker", e))
 
 
 # ── Sentiment mutation alert ───────────────────────────────────────────────────

@@ -17,6 +17,8 @@ from typing import Dict, List, Tuple
 
 import streamlit as st
 from user_config import load_kol_whitelist
+from kol_config import ANALYST_DIRECTORY
+from ui_components import navigate_to_ticker
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 1. WHITELIST — 手工篩選高信譽分析師
@@ -127,6 +129,10 @@ WHITELIST: List[Dict] = [
         "rationale": "權威財經媒體，記者具備深度財務培訓，報導包含數據來源引用",
     },
 ]
+
+# Keep the historical scoring/picks schema while sourcing the expanded
+# directory from the data-only config module.
+WHITELIST = ANALYST_DIRECTORY
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2. PICKS_DATA — 模擬爬蟲輸出 (可替換為真實 API/爬蟲結果)
@@ -282,7 +288,7 @@ def call_gemini_consensus(top_picks: List[Dict], api_key: str) -> List[Dict]:
 
 {theses_text}
 
-共有 {pick['consensus']} 位白名單專家推薦此標的（白名單人數共 8 位）。
+共有 {pick['consensus']} 位白名單專家推薦此標的（白名單目錄共 {len(WHITELIST)} 位）。
 
 請輸出 JSON 格式（只回傳 JSON，不要其他文字）：
 {{
@@ -317,6 +323,80 @@ def call_gemini_consensus(top_picks: List[Dict], api_key: str) -> List[Dict]:
 # ──────────────────────────────────────────────────────────────────────────────
 # 5. Streamlit 渲染入口
 # ──────────────────────────────────────────────────────────────────────────────
+def render_analyst_directory() -> None:
+    """Render the searchable, style-filtered 20+ analyst directory."""
+    st.markdown("### 🧭 精選美股分析師目錄")
+    st.caption(
+        f"共 {len(ANALYST_DIRECTORY)} 位公開研究者與機構。"
+        "代表標的是研究主題或公開資料中的代表性標的，不代表即時持倉。"
+    )
+    search = st.text_input(
+        "搜尋姓名、機構或代表 Ticker",
+        placeholder="例如：Buffett、Macro、NVDA、BlackRock",
+        key="analyst_directory_search",
+    ).strip().lower()
+    core_styles = ["全部", "Value", "Tech", "Macro", "Quant", "Income"]
+    tabs = st.tabs(core_styles)
+
+    for tab, style in zip(tabs, core_styles):
+        with tab:
+            matches = [
+                analyst
+                for analyst in ANALYST_DIRECTORY
+                if (
+                    style == "全部" or style in analyst.get("style_tags", [])
+                )
+                and (
+                    not search
+                    or search
+                    in " ".join(
+                        [
+                            analyst["name"],
+                            analyst["org"],
+                            " ".join(analyst.get("style_tags", [])),
+                            " ".join(analyst.get("representative_tickers", [])),
+                            analyst.get("focus", ""),
+                        ]
+                    ).lower()
+                )
+            ]
+            if not matches:
+                st.info("找不到符合條件的分析師，請調整搜尋文字或分類。")
+                continue
+            st.caption(f"顯示 {len(matches)} 位")
+            for start in range(0, len(matches), 3):
+                cols = st.columns(3)
+                for col, analyst in zip(cols, matches[start : start + 3]):
+                    with col:
+                        tags = " ".join(
+                            f"`{tag}`" for tag in analyst.get("style_tags", [])
+                        )
+                        st.markdown(
+                            f"**{analyst['name']}**  \n"
+                            f"<span style='color:#8B949E'>{analyst['org']}</span>  \n"
+                            f"{tags}  \n"
+                            f"<span style='font-size:12px;color:#8B949E'>"
+                            f"{analyst['focus']}</span>",
+                            unsafe_allow_html=True,
+                        )
+                        st.caption("代表研究標的")
+                        ticker_cols = st.columns(
+                            len(analyst.get("representative_tickers", []))
+                        )
+                        for ticker_col, ticker in zip(
+                            ticker_cols, analyst.get("representative_tickers", [])
+                        ):
+                            with ticker_col:
+                                if st.button(
+                                    ticker,
+                                    key=f"analyst_diag_{style}_{analyst['id']}_{ticker}",
+                                    use_container_width=True,
+                                    help="帶入既有個股診斷與 7-Factor 分析",
+                                ):
+                                    navigate_to_ticker(ticker)
+                st.markdown("---")
+
+
 def render_kol_section(api_key: str = "") -> None:
     """主渲染函數，插入 Macro 頁面的 KOL 區塊。"""
 
@@ -326,6 +406,7 @@ def render_kol_section(api_key: str = "") -> None:
         "②推薦包含結構化論點（非標題黨）、③機構或平台背書。"
         "觀點一致性、時效性、論點品質三維加權計分。"
     )
+    render_analyst_directory()
 
     # ── 合併用戶自定義 KOL ──────────────────────────────────────────────────────
     _user_handles = load_kol_whitelist()

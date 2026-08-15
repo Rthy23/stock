@@ -1,0 +1,159 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import plotly.express as px
+
+# 1. 定義板塊與代表性標的數據結構
+SECTOR_DATA = {
+    "資訊科技 (Technology)": {
+        "etf": "XLK",
+        "top_etfs": ["XLK", "SOXX", "SMH"],
+        "top_stocks": ["NVDA", "AAPL", "MSFT", "AVGO"]
+    },
+    "通訊服務 (Communication)": {
+        "etf": "XLC",
+        "top_etfs": ["XLC", "FCOM"],
+        "top_stocks": ["GOOGL", "META", "NFLX", "TMUS"]
+    },
+    "非必需消費 (Consumer Disc.)": {
+        "etf": "XLY",
+        "top_etfs": ["XLY", "VCR"],
+        "top_stocks": ["AMZN", "TSLA", "HD", "NKE"]
+    },
+    "金融 (Financials)": {
+        "etf": "XLF",
+        "top_etfs": ["XLF", "VFH"],
+        "top_stocks": ["BRK-B", "JPM", "V", "MA"]
+    },
+    "醫療保健 (Health Care)": {
+        "etf": "XLV",
+        "top_etfs": ["XLV", "VHT"],
+        "top_stocks": ["LLY", "UNH", "JNJ", "ABBV"]
+    },
+    "必需消費 (Consumer Staples)": {
+        "etf": "XLP",
+        "top_etfs": ["XLP", "VDC"],
+        "top_stocks": ["PG", "COST", "PEP", "KO"]
+    },
+    "能源 (Energy)": {
+        "etf": "XLE",
+        "top_etfs": ["XLE", "VDE"],
+        "top_stocks": ["XOM", "CVX", "COP", "SLB"]
+    },
+    "工業 (Industrials)": {
+        "etf": "XLI",
+        "top_etfs": ["XLI", "VIS"],
+        "top_stocks": ["GE", "CAT", "HON", "UNP"]
+    },
+    "公用事業 (Utilities)": {
+        "etf": "XLU",
+        "top_etfs": ["XLU", "VPU"],
+        "top_stocks": ["NEE", "SO", "DUK", "CEG"]
+    },
+    "房地產 (Real Estate)": {
+        "etf": "XLRE",
+        "top_etfs": ["XLRE", "VNQ"],
+        "top_stocks": ["PLD", "AMT", "EQIX", "WELL"]
+    },
+    "原材料 (Materials)": {
+        "etf": "XLB",
+        "top_etfs": ["XLB", "VAW"],
+        "top_stocks": ["LIN", "APD", "SHW", "FCX"]
+    }
+}
+
+# 2. 緩存數據抓取函數，避免 API Rate Limit
+@st.cache_data(ttl=3600)
+def fetch_sector_performance():
+    tickers = [data["etf"] for data in SECTOR_DATA.values()]
+    # 額外抓取大盤 S&P500 (SPY) 作為基準
+    tickers.append("SPY")
+    
+    df = yf.download(tickers, period="1y")["Close"]
+    
+    # 計算近 1個月、3個月、1年報酬率
+    latest = df.iloc[-1]
+    m1 = (latest / df.iloc[-21] - 1) * 100
+    m3 = (latest / df.iloc[-63] - 1) * 100
+    y1 = (latest / df.iloc[0] - 1) * 100
+    
+    res = []
+    for sector_name, info in SECTOR_DATA.items():
+        etf = info["etf"]
+        res.append({
+            "板塊名稱": sector_name,
+            "ETF": etf,
+            "近1個月 (%)": round(m1[etf], 2),
+            "近3個月 (%)": round(m3[etf], 2),
+            "近1年 (%)": round(y1[etf], 2)
+        })
+    
+    perf_df = pd.DataFrame(res)
+    spy_m1 = round(m1["SPY"], 2)
+    return perf_df, spy_m1
+
+# 3. Streamlit UI 頁面渲染
+def render_sector_page():
+    st.title("📊 美股熱門行業板塊分析")
+    st.caption("追蹤美股 11 大行業板塊表現，尋找資金輪動趨勢與潛在投資標的。")
+
+    with st.spinner("正在讀取最新板塊數據..."):
+        try:
+            perf_df, spy_m1 = fetch_sector_performance()
+        except Exception as e:
+            st.error(f"數據讀取失敗: {e}")
+            return
+
+    # 時間範圍選擇器
+    timeframe = st.radio("選擇排序時間範圍", ["近1個月 (%)", "近3個月 (%)", "近1年 (%)"], horizontal=True)
+    sorted_df = perf_df.sort_values(by=timeframe, ascending=False).reset_index(drop=True)
+
+    # 圖表呈現：板塊表現排行榜
+    fig = px.bar(
+        sorted_df,
+        x=timeframe,
+        y="板塊名稱",
+        orientation="h",
+        color=timeframe,
+        color_continuous_scale="RdYlGn",
+        title=f"美股板塊報酬率排行榜 ({timeframe})"
+    )
+    fig.update_layout(yaxis={"categoryorder": "total ascending"})
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("🔥 當前熱門板塊與精選標的")
+
+    # 顯示前三名熱門板塊
+    top_3 = sorted_df.head(3)
+    cols = st.columns(3)
+
+    for idx, col in enumerate(cols):
+        sector_info = top_3.iloc[idx]
+        sector_name = sector_info["板塊名稱"]
+        data = SECTOR_DATA[sector_name]
+
+        with col:
+            st.success(f"**第 {idx+1} 名：{sector_name}**")
+            st.metric("近1個月表現", f"{sector_info['近1個月 (%)']}%", delta=f"{round(sector_info['近1個月 (%)'] - spy_m1, 2)}% vs SPY")
+            
+            st.write("**推薦代表性 ETF：**")
+            for etf in data["top_etfs"]:
+                st.code(etf, language=None)
+
+            st.write("**代表性龍頭個股：**")
+            for stock in data["top_stocks"]:
+                # 一鍵帶入 7-Factor 診斷與美股回測
+                c1, c2 = st.columns([2, 1])
+                c1.write(f"📈 **{stock}**")
+                if c2.button("診斷", key=f"diag_{stock}"):
+                    st.session_state["target_ticker"] = stock
+                    st.session_state["active_tab"] = "個股診斷"
+                    st.rerun()
+
+    st.markdown("---")
+    st.subheader("📋 11 大板塊完整數據表")
+    st.dataframe(sorted_df, use_container_width=True)
+
+if __name__ == "__main__":
+    render_sector_page()
