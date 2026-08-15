@@ -196,7 +196,7 @@ def _render_curated_consensus() -> None:
         st.info("目前沒有可用的精選分析師推薦資料。")
         return
 
-    rows = [
+    all_rows = [
         {
             "排名": index,
             "Ticker": pick["ticker"],
@@ -204,12 +204,21 @@ def _render_curated_consensus() -> None:
             "推薦專家數": pick["consensus"],
             "推薦專家": "、".join(dict.fromkeys(pick["experts"])),
         }
-        for index, pick in enumerate(ranked[:15], 1)
+        for index, pick in enumerate(ranked, 1)
     ]
-    curated_df = pd.DataFrame(rows)
+    top_rows = all_rows[:15]
+    rest_rows = all_rows[15:]
+
+    curated_df = pd.DataFrame(top_rows)
     st.dataframe(curated_df, use_container_width=True, hide_index=True)
+
+    if rest_rows:
+        with st.expander(f"顯示其餘 {len(rest_rows)} 支標的（共 {len(all_rows)} 支）"):
+            st.dataframe(pd.DataFrame(rest_rows), use_container_width=True, hide_index=True)
+
+    all_tickers = [r["Ticker"] for r in all_rows]
     _render_diagnosis_buttons(
-        curated_df["Ticker"].head(8).tolist(),
+        all_tickers[:8],
         "curated_consensus_diag",
     )
 

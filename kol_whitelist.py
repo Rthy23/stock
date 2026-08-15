@@ -185,6 +185,101 @@ PICKS_DATA: List[Dict] = [
     {"kol_id": "wsj_markets",     "ticker": "MSFT", "date": (_today - timedelta(days=1)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "報導：企業 AI 軟體採用進入主流，Copilot 付費席次季增 40%"},
     {"kol_id": "wsj_markets",     "ticker": "GOOGL","date": (_today - timedelta(days=4)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "報導：Gemini 整合 Workspace 後廣告 CTR 提升，廣告主預算回流"},
     {"kol_id": "wsj_markets",     "ticker": "META", "date": (_today - timedelta(days=4)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "報導：Llama AI 模型開源策略吸引企業用戶，廣告算法精準度再提升"},
+
+    # Warren Buffett
+    {"kol_id": "warren_buffett",  "ticker": "AAPL", "date": (_today - timedelta(days=5)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "蘋果是消費者行為最佳護城河之一，服務收入持續成長，現金回購力道強勁"},
+    {"kol_id": "warren_buffett",  "ticker": "KO",   "date": (_today - timedelta(days=10)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "定價權穩固，全球分銷網絡無可複製，股息增長超過 60 年"},
+    {"kol_id": "warren_buffett",  "ticker": "BRK-B","date": (_today - timedelta(days=14)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "多元業務組合提供穩定現金流，帳面保守低槓桿，長期複利機器"},
+
+    # Charlie Munger
+    {"kol_id": "charlie_munger",  "ticker": "COST", "date": (_today - timedelta(days=6)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "會員制商業模式黏性極強，倉儲零售護城河可持續複利增長"},
+    {"kol_id": "charlie_munger",  "ticker": "AAPL", "date": (_today - timedelta(days=9)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "品質企業應長期持有，蘋果生態系統鎖定效應為最佳商業模式範本"},
+    {"kol_id": "charlie_munger",  "ticker": "BRK-B","date": (_today - timedelta(days=20)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "避免愚蠢決策勝過追求聰明操作，持有優質資產等待時間複利"},
+
+    # Stanley Druckenmiller
+    {"kol_id": "stanley_druckenmiller", "ticker": "NVDA", "date": (_today - timedelta(days=2)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "AI 算力需求正處於史上最大資本支出週期，流動性驅動動能顯著"},
+    {"kol_id": "stanley_druckenmiller", "ticker": "MSFT", "date": (_today - timedelta(days=7)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "企業雲端與 AI 整合加速，Azure 收入週期確定性高，值得集中高確信"},
+    {"kol_id": "stanley_druckenmiller", "ticker": "QQQ",  "date": (_today - timedelta(days=12)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "科技龍頭盈利動能與流動性環境共振，趨勢跟隨策略持有科技 ETF"},
+
+    # David Tepper
+    {"kol_id": "david_tepper",    "ticker": "AMZN", "date": (_today - timedelta(days=3)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "AWS 與廣告雙引擎驅動自由現金流爆發，政策寬鬆環境利好估值修復"},
+    {"kol_id": "david_tepper",    "ticker": "META", "date": (_today - timedelta(days=5)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "AI 廣告精準化提升 ARPU，宏觀消費回暖利好廣告支出週期"},
+    {"kol_id": "david_tepper",    "ticker": "QQQ",  "date": (_today - timedelta(days=11)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "聯準會政策轉向訊號明確，流動性驅動科技股估值擴張"},
+
+    # Bill Ackman
+    {"kol_id": "bill_ackman",     "ticker": "CMG",  "date": (_today - timedelta(days=4)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "品牌定價權強，同店銷售穩健，數位點餐滲透率持續提升"},
+    {"kol_id": "bill_ackman",     "ticker": "HLT",  "date": (_today - timedelta(days=8)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "輕資產加盟模式現金流穩定，旅遊復甦長期趨勢支撐入住率"},
+    {"kol_id": "bill_ackman",     "ticker": "GOOG", "date": (_today - timedelta(days=13)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "搜索廣告護城河穩固，雲端業務加速，AI 整合提升貨幣化效率"},
+
+    # Seth Klarman
+    {"kol_id": "seth_klarman",    "ticker": "GOOG", "date": (_today - timedelta(days=7)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "估值相對科技同業具備安全邊際，廣告業務現金流充足支撐下行保護"},
+    {"kol_id": "seth_klarman",    "ticker": "EBAY", "date": (_today - timedelta(days=15)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "市場忽視的二手電商平台，估值偏低，自由現金流持續回購支撐"},
+    {"kol_id": "seth_klarman",    "ticker": "WBD",  "date": (_today - timedelta(days=20)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "困境資產估值已大幅折讓，串流整合進展超預期可帶來困境反轉"},
+
+    # Joel Greenblatt
+    {"kol_id": "joel_greenblatt", "ticker": "SPY",  "date": (_today - timedelta(days=6)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "Magic Formula 篩選後，S&P500 整體盈利殖利率仍具吸引力"},
+    {"kol_id": "joel_greenblatt", "ticker": "VTV",  "date": (_today - timedelta(days=10)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "價值因子輪動訊號浮現，高資本回報率 + 低估值的組合歷史表現優異"},
+    {"kol_id": "joel_greenblatt", "ticker": "GILD", "date": (_today - timedelta(days=18)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "生技股盈利殖利率偏高，研發管線具備上行期權，符合 Magic Formula 篩選"},
+
+    # Mohnish Pabrai
+    {"kol_id": "mohnish_pabrai",  "ticker": "GOOG", "date": (_today - timedelta(days=5)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "複製 Buffett 邏輯：護城河深、現金流豐沛，長期複利特質明顯"},
+    {"kol_id": "mohnish_pabrai",  "ticker": "MU",   "date": (_today - timedelta(days=9)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "記憶體週期底部已過，HBM AI 需求爆發，勝率高且下行有限"},
+    {"kol_id": "mohnish_pabrai",  "ticker": "AMR",  "date": (_today - timedelta(days=17)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "冶金煤供應緊縮，鋼鐵產業鏈需求穩定，低估值高確信反向佈局"},
+
+    # Aswath Damodaran
+    {"kol_id": "aswath_damodaran","ticker": "AAPL", "date": (_today - timedelta(days=4)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "DCF 模型顯示服務業務成長支撐合理估值，風險溢價已充分反映"},
+    {"kol_id": "aswath_damodaran","ticker": "MSFT", "date": (_today - timedelta(days=8)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "終端成長率假設保守下仍具內在價值，雲端業務可見度高降低估值不確定性"},
+    {"kol_id": "aswath_damodaran","ticker": "SPY",  "date": (_today - timedelta(days=14)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "權益風險溢價維持歷史均值，整體市場估值中性，指數持有具合理報酬期望"},
+
+    # Tom Lee
+    {"kol_id": "tom_lee",         "ticker": "SPY",  "date": (_today - timedelta(days=2)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "盈利動能強、市場廣度擴張，Fundstrat 年度目標價上調，偏多策略"},
+    {"kol_id": "tom_lee",         "ticker": "QQQ",  "date": (_today - timedelta(days=5)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "科技股通常在升息尾聲反彈最猛，流動性改善有利成長股估值修復"},
+    {"kol_id": "tom_lee",         "ticker": "NVDA", "date": (_today - timedelta(days=7)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "AI 資本支出超預期，NVDA 作為核心受益者動能仍強，中線目標持續上調"},
+
+    # Dan Ives
+    {"kol_id": "dan_ives",        "ticker": "TSLA", "date": (_today - timedelta(days=1)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "Robotaxi 時間表明確，FSD 商業化打開新 TAM，Wedbush 維持 Buy 評級"},
+    {"kol_id": "dan_ives",        "ticker": "AAPL", "date": (_today - timedelta(days=3)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "Apple Intelligence 帶動 iPhone 升級超級週期，AI 服務貨幣化進入加速期"},
+    {"kol_id": "dan_ives",        "ticker": "MSFT", "date": (_today - timedelta(days=6)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "Copilot 企業滲透率每季加速，Azure AI 收入指引上調，科技大多頭的核心"},
+
+    # Gene Munster
+    {"kol_id": "gene_munster",    "ticker": "AAPL", "date": (_today - timedelta(days=2)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "Apple Intelligence 推動 AI 手機升級浪潮，Deepwater 看好五年 AI 生態收入"},
+    {"kol_id": "gene_munster",    "ticker": "NVDA", "date": (_today - timedelta(days=4)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "AI 訓練與推論算力需求長期飽和，Blackwell 架構確立下一代主流地位"},
+    {"kol_id": "gene_munster",    "ticker": "TSLA", "date": (_today - timedelta(days=8)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "自動駕駛技術領先優勢擴大，Optimus 機器人可能成為下一個十億級產品"},
+
+    # Liz Ann Sonders
+    {"kol_id": "liz_ann_sonders", "ticker": "SPY",  "date": (_today - timedelta(days=3)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "市場廣度持續改善，景氣擴張中期，Schwab 策略建議均衡持有核心 ETF"},
+    {"kol_id": "liz_ann_sonders", "ticker": "SCHD", "date": (_today - timedelta(days=9)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "股息成長因子在景氣轉換期提供防禦性，現金流質量篩選降低波動風險"},
+    {"kol_id": "liz_ann_sonders", "ticker": "IWM",  "date": (_today - timedelta(days=16)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "小型股估值折讓歷史高位，若景氣軟著陸成功將受益均值回歸輪動"},
+
+    # Ed Yardeni
+    {"kol_id": "ed_yardeni",      "ticker": "SPY",  "date": (_today - timedelta(days=2)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "盈利週期依然強勁，Yardeni Research 維持牛市基本情境，S&P 500 目標上調"},
+    {"kol_id": "ed_yardeni",      "ticker": "XLI",  "date": (_today - timedelta(days=10)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "製造業回流 + 基建支出帶動工業板塊盈利，景氣擴張中期工業股具上升空間"},
+    {"kol_id": "ed_yardeni",      "ticker": "XLF",  "date": (_today - timedelta(days=14)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "利率高原期有利銀行淨息差，金融板塊估值合理且股息率具吸引力"},
+
+    # Goldman Sachs Global Research
+    {"kol_id": "goldman_global_research", "ticker": "SPY",  "date": (_today - timedelta(days=1)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "GS 2025 S&P 500 目標上調，盈利預期上修，機構研究維持超配美股"},
+    {"kol_id": "goldman_global_research", "ticker": "QQQ",  "date": (_today - timedelta(days=5)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "AI Capex 超預期帶動科技股盈利修正向上，Goldman 因子模型看好科技配置"},
+    {"kol_id": "goldman_global_research", "ticker": "XLF",  "date": (_today - timedelta(days=11)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "利率環境支撐銀行盈利，GS 量化模型顯示金融板塊估值因子與動能共振"},
+
+    # J.P. Morgan Global Research
+    {"kol_id": "jpmorgan_global_research","ticker": "SPY",  "date": (_today - timedelta(days=3)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "JPM 策略師認為美股盈利韌性支撐估值，軟著陸情境下維持股票標配"},
+    {"kol_id": "jpmorgan_global_research","ticker": "JPM",  "date": (_today - timedelta(days=7)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "淨息差擴張與信貸品質改善，J.P. Morgan 自身盈利動能強，銀行股首選"},
+    {"kol_id": "jpmorgan_global_research","ticker": "TLT",  "date": (_today - timedelta(days=13)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "長債殖利率接近頂部，若降息週期啟動長天期國債提供資本利得機會"},
+
+    # BlackRock Investment Institute
+    {"kol_id": "blackrock_institute",     "ticker": "IVV",  "date": (_today - timedelta(days=4)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "BlackRock 維持美股核心配置，AI 主題結構性成長支撐大型股長期回報"},
+    {"kol_id": "blackrock_institute",     "ticker": "AGG",  "date": (_today - timedelta(days=8)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "投資等級債提供穩定票息，降息環境下資本增值空間開啟，防禦性配置首選"},
+    {"kol_id": "blackrock_institute",     "ticker": "SGOV", "date": (_today - timedelta(days=12)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "超短期國庫券利率具吸引力，BlackRock 建議以現金等價物作為戰術緩衝部位"},
+
+    # Morgan Stanley Research
+    {"kol_id": "morgan_stanley_research", "ticker": "SPY",  "date": (_today - timedelta(days=2)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "MS 策略師看好盈利週期延長，產業鏈數據顯示需求持續優於預期"},
+    {"kol_id": "morgan_stanley_research", "ticker": "XLK",  "date": (_today - timedelta(days=6)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "AI 算力建設與軟體採用同步加速，科技板塊收入能見度高，維持超配"},
+    {"kol_id": "morgan_stanley_research", "ticker": "MSFT", "date": (_today - timedelta(days=10)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "MS 研究：Azure 季增速再加速，Copilot 付費席次倍增，上調目標價"},
+
+    # Morningstar Quantitative Research
+    {"kol_id": "morningstar_quant",       "ticker": "VOO",  "date": (_today - timedelta(days=3)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "Morningstar 量化評估 VOO 費用率最低、因子分布均衡，長期核心配置首選"},
+    {"kol_id": "morningstar_quant",       "ticker": "VTV",  "date": (_today - timedelta(days=7)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "價值因子估值折讓擴大，Morningstar 星級評分顯示潛在漲幅高於歷史中位數"},
+    {"kol_id": "morningstar_quant",       "ticker": "VIG",  "date": (_today - timedelta(days=11)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "股息成長篩選確保盈利品質，Morningstar 量化模型顯示長期風險調整報酬優異"},
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────
