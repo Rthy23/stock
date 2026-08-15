@@ -444,44 +444,69 @@ def parse_ibkr_screenshot(image_bytes: bytes, mime_type: str = "image/png") -> t
 
 # ── Stock data fetching ────────────────────────────────────────────────────────
 @st.cache_data(ttl=900)
+def _fetch_stock_info_cached(ticker: str) -> dict:
+    """Cached inner fetch.  Raises on failure so st.cache_data never stores
+    a bad result — only successful dicts are cached for 15 minutes."""
+    stock = yf.Ticker(ticker)
+    info  = stock.info or {}
+
+    # yfinance returns a 1-key {"trailingPegRatio": None} dict for unknown
+    # tickers, but may also return a sparse dict with a few keys for valid
+    # tickers during off-hours.  Use fast_info as the authoritative liveness
+    # check: if we can get a price there the ticker is real even if .info is
+    # sparse.
+    fi = stock.fast_info  # lightweight, always available for listed tickers
+
+    _price = (
+        info.get("currentPrice")
+        or info.get("regularMarketPrice")
+        or 0
+    )
+    if not _price:
+        try:
+            _price = float(fi.last_price or 0)
+        except Exception:
+            _price = 0
+
+    # A ticker is invalid only when both info and fast_info give us nothing.
+    _has_name  = bool(info.get("longName") or info.get("shortName") or info.get("symbol"))
+    _has_price = bool(_price)
+    _has_quote = bool(info.get("quoteType") or info.get("regularMarketPrice")
+                      or info.get("currentPrice"))
+    if not (_has_name or _has_price or _has_quote):
+        raise ValueError(f"No data found for ticker '{ticker}'")
+
+    # 52-week range: prefer info, fall back to fast_info attributes.
+    _52h = info.get("fiftyTwoWeekHigh", 0) or 0
+    _52l = info.get("fiftyTwoWeekLow",  0) or 0
+    if not _52h:
+        try:
+            _52h = float(getattr(fi, "year_high", 0) or 0)
+            _52l = float(getattr(fi, "year_low",  0) or 0)
+        except Exception:
+            pass
+
+    return {
+        "ticker":          ticker,
+        "name":            info.get("longName") or info.get("shortName") or ticker,
+        "sector":          info.get("sector", "N/A"),
+        "market_cap":      info.get("marketCap", 0) or 0,
+        "net_margin":      info.get("profitMargins", 0) or 0,
+        "pe_ratio":        info.get("trailingPE", 0) or 0,
+        "revenue_growth":  info.get("revenueGrowth", 0) or 0,
+        "price":           _price,
+        "52w_high":        _52h,
+        "52w_low":         _52l,
+        "dividend_yield":  info.get("dividendYield", 0) or 0,
+        "eps":             info.get("trailingEps", 0) or 0,
+        "beta":            info.get("beta", 0) or 0,
+    }
+
+
 def get_stock_info(ticker: str) -> dict | None:
+    """Public wrapper — returns None on any error (never caches failures)."""
     try:
-        stock = yf.Ticker(ticker)
-        info  = stock.info
-
-        # Reject clearly invalid tickers (yfinance returns a 1-key dict for 404s)
-        if not info or len(info) <= 1:
-            return None
-
-        # Price: try info fields first, then fast_info as a reliable fallback.
-        # Recent yfinance (2.x) sometimes omits currentPrice/regularMarketPrice
-        # from the info dict during extended hours or for certain exchanges.
-        _price = (
-            info.get("currentPrice")
-            or info.get("regularMarketPrice")
-            or 0
-        )
-        if not _price:
-            try:
-                _price = float(stock.fast_info.last_price or 0)
-            except Exception:
-                _price = 0
-
-        return {
-            "ticker":          ticker,
-            "name":            info.get("longName") or info.get("shortName") or ticker,
-            "sector":          info.get("sector", "N/A"),
-            "market_cap":      info.get("marketCap", 0) or 0,
-            "net_margin":      info.get("profitMargins", 0) or 0,
-            "pe_ratio":        info.get("trailingPE", 0) or 0,
-            "revenue_growth":  info.get("revenueGrowth", 0) or 0,
-            "price":           _price,
-            "52w_high":        info.get("fiftyTwoWeekHigh", 0) or 0,
-            "52w_low":         info.get("fiftyTwoWeekLow", 0) or 0,
-            "dividend_yield":  info.get("dividendYield", 0) or 0,
-            "eps":             info.get("trailingEps", 0) or 0,
-            "beta":            info.get("beta", 0) or 0,
-        }
+        return _fetch_stock_info_cached(ticker)
     except Exception as e:
         print(_err("get_stock_info", e))
         return None
