@@ -46,13 +46,12 @@ def fetch_macro_indicators() -> dict[str, Any]:
         threads=False,
         group_by="column",
     )
-    close = (
-        _extract_close_frame(downloaded, tickers)
-        .ffill()
-        .dropna(subset=tickers)
-    )
+    close = _extract_close_frame(downloaded, tickers)
     required = [ticker for ticker in tickers if ticker not in close.columns]
-    if required or len(close) < 200:
+    if required:
+        raise RuntimeError(f"宏觀市場資料不完整：{', '.join(required)}")
+    close = close.ffill().dropna(subset=tickers)
+    if len(close) < 200:
         missing = ", ".join(required) if required else "SPY 200MA 歷史資料不足"
         raise RuntimeError(f"宏觀市場資料不完整：{missing}")
 
@@ -100,68 +99,72 @@ def classify_market_risk(macro: dict[str, Any]) -> tuple[str, int, list[str]]:
 
 def calculate_allocation(
     macro: dict[str, Any],
-    user_risk_profile: str = "穩健保守型",
-) -> tuple[str, str, int, int, int]:
-    """Calculate cash/ETF/stock percentages from TNX, VIX and SPY 200MA."""
+    user_risk_profile: str | None = None,
+) -> tuple[str, str, int, int, int, int]:
+    """Calculate four-asset percentages from VIX and SPY 200MA.
+
+    ``user_risk_profile`` is retained as an ignored compatibility argument
+    for callers from the earlier three-asset version.
+    """
     vix = float(macro["vix"])
     spy_bull = bool(macro["spy_above_ma200"])
 
     if vix > 25:
-        regime = "高風險恐慌期"
+        regime = "高風險恐慌期 (High Risk / Offense Guard)"
         description = (
-            "VIX 偏高，優先提高定存與短債，保留流動性等待市場波動收斂。"
+            "市場恐慌指數偏高，建議提高美元定存與短債比重；"
+            "全球國際市場以高股息與防守型標的為主。"
         )
-        stocks_pct, etf_pct, cash_pct = 15, 35, 50
+        cash_pct, us_etf_pct, global_pct, stocks_pct = 45, 30, 15, 10
     elif not spy_bull:
-        regime = "空頭／震盪調整期"
+        regime = "空頭／震盪調整期 (Bear / Correction Market)"
         description = (
-            "SPY 跌破 200MA，降低高波動個股，改以核心 ETF 與短債防守。"
+            "SPY 跌破 200MA，適度分散至估值較低的歐洲與日本市場，"
+            "同時降低高波動個股。"
         )
-        stocks_pct, etf_pct, cash_pct = 20, 45, 35
-    elif vix < 15:
-        regime = "多頭牛市期"
+        cash_pct, us_etf_pct, global_pct, stocks_pct = 35, 35, 15, 15
+    elif vix < 15 and spy_bull:
+        regime = "多頭牛市期 (Bullish Risk-On)"
         description = (
-            "VIX 偏低且 SPY 位於 200MA 之上，可適度提高成長型個股比重。"
+            "全球風險偏好回升，提高美股個股與全球半導體／AI ADR，"
+            "例如台積電 TSM 的配置。"
         )
-        stocks_pct, etf_pct, cash_pct = 40, 45, 15
+        cash_pct, us_etf_pct, global_pct, stocks_pct = 10, 40, 20, 30
     else:
-        regime = "溫和震盪期"
-        description = "市場訊號均衡，維持 ETF 核心、個股增益與短債緩衝。"
-        stocks_pct, etf_pct, cash_pct = 30, 50, 20
+        regime = "溫和震盪期 (Neutral / Balanced Market)"
+        description = (
+            "市場處於均衡狀態，維持 15% 國際市場比重，"
+            "達成地理與幣別分散投資。"
+        )
+        cash_pct, us_etf_pct, global_pct, stocks_pct = 20, 40, 15, 25
 
-    # The macro regime remains the primary signal; the profile adjusts only
-    # stock-vs-short-bond risk within that regime.
-    if user_risk_profile == "穩健保守型":
-        shift = min(10, stocks_pct)
-        stocks_pct -= shift
-        cash_pct += shift
-    elif user_risk_profile == "積極成長型":
-        shift = min(10, cash_pct)
-        stocks_pct += shift
-        cash_pct -= shift
-    return regime, description, stocks_pct, etf_pct, cash_pct
+    return regime, description, cash_pct, us_etf_pct, global_pct, stocks_pct
 
 
 ALLOCATION_PLANS: dict[str, list[dict[str, Any]]] = {
     "高風險恐慌期": [
-        {"資產類別": "美元定存／短債", "比例": 0.60, "建議標的": "SGOV / BIL", "說明": "提高流動性與防守緩衝"},
-        {"資產類別": "ETF 基金", "比例": 0.35, "建議標的": "VOO / USMV", "說明": "保留核心市場參與"},
-        {"資產類別": "精選美股個股", "比例": 0.05, "建議標的": "MSFT / BRK-B", "說明": "僅保留高品質核心個股"},
+        {"資產類別": "美元定存／短債", "比例": 0.45, "建議標的": "SGOV / BIL", "說明": "提高流動性與防守緩衝"},
+        {"資產類別": "美股核心 ETF", "比例": 0.30, "建議標的": "VOO / USMV", "說明": "保留美股核心市場參與"},
+        {"資產類別": "全球國際市場 (Global ADRs/ETFs)", "比例": 0.15, "建議標的": "ASML / NVO / EWJ / EWT", "說明": "以防守型海外市場分散風險"},
+        {"資產類別": "精選美股個股", "比例": 0.10, "建議標的": "MSFT / BRK-B", "說明": "僅保留高品質核心個股"},
     ],
     "空頭／震盪調整期": [
-        {"資產類別": "美元定存／短債", "比例": 0.45, "建議標的": "SGOV / BIL", "說明": "等待趨勢重新站回 200MA"},
-        {"資產類別": "ETF 基金", "比例": 0.45, "建議標的": "VOO / SPLV", "說明": "以分散與低波動為核心"},
-        {"資產類別": "精選美股個股", "比例": 0.10, "建議標的": "JNJ / PG", "說明": "降低個股波動與集中風險"},
+        {"資產類別": "美元定存／短債", "比例": 0.35, "建議標的": "SGOV / BIL", "說明": "等待趨勢重新站回 200MA"},
+        {"資產類別": "美股核心 ETF", "比例": 0.35, "建議標的": "VOO / SPLV", "說明": "以分散與低波動為核心"},
+        {"資產類別": "全球國際市場 (Global ADRs/ETFs)", "比例": 0.15, "建議標的": "ASML / NVO / EWJ / EWT", "說明": "分散美股單一市場風險"},
+        {"資產類別": "精選美股個股", "比例": 0.15, "建議標的": "JNJ / PG", "說明": "降低個股波動與集中風險"},
     ],
     "多頭牛市期": [
-        {"資產類別": "美元定存／短債", "比例": 0.15, "建議標的": "SGOV / BIL", "說明": "維持最低流動性緩衝"},
-        {"資產類別": "ETF 基金", "比例": 0.45, "建議標的": "VOO / QQQ", "說明": "參與指數與成長趨勢"},
-        {"資產類別": "精選美股個股", "比例": 0.40, "建議標的": "NVDA / MSFT", "說明": "搭配 7-Factor 尋找超額報酬"},
+        {"資產類別": "美元定存／短債", "比例": 0.10, "建議標的": "SGOV / BIL", "說明": "維持最低流動性緩衝"},
+        {"資產類別": "美股核心 ETF", "比例": 0.40, "建議標的": "VOO / QQQ / XLK", "說明": "參與美股指數與成長趨勢"},
+        {"資產類別": "全球國際市場 (Global ADRs/ETFs)", "比例": 0.20, "建議標的": "TSM / ASML / NVO / EWJ / EWT", "說明": "提高全球半導體與 AI 供應鏈配置"},
+        {"資產類別": "精選美股個股", "比例": 0.30, "建議標的": "NVDA / MSFT", "說明": "搭配 7-Factor 尋找超額報酬"},
     ],
     "溫和震盪期": [
         {"資產類別": "美元定存／短債", "比例": 0.20, "建議標的": "SGOV / BIL", "說明": "保留再平衡資金"},
-        {"資產類別": "ETF 基金", "比例": 0.50, "建議標的": "VOO / VIG", "說明": "以分散與品質為核心"},
-        {"資產類別": "精選美股個股", "比例": 0.30, "建議標的": "AAPL / GOOGL", "說明": "適度配置高品質龍頭"},
+        {"資產類別": "美股核心 ETF", "比例": 0.40, "建議標的": "VOO / VIG", "說明": "以分散與品質為核心"},
+        {"資產類別": "全球國際市場 (Global ADRs/ETFs)", "比例": 0.15, "建議標的": "TSM / ASML / NVO / EWJ / EWT", "說明": "維持地理與幣別分散"},
+        {"資產類別": "精選美股個股", "比例": 0.25, "建議標的": "AAPL / GOOGL", "說明": "適度配置高品質美股龍頭"},
     ],
 }
 
@@ -173,6 +176,7 @@ def _allocation_table(plan: list[dict[str, Any]], amount: float) -> pd.DataFrame
             {
                 **item,
                 "比例": f"{item['比例']:.0%}",
+                "比例數值": item["比例"],
                 "建議金額 (USD)": amount * item["比例"],
             }
         )
@@ -180,10 +184,11 @@ def _allocation_table(plan: list[dict[str, Any]], amount: float) -> pd.DataFrame
 
 
 def render_portfolio_allocation_page() -> None:
-    st.title("🧭 穩健資產配置策略")
+    st.title("🧭 穩健型資產配置策略（含全球國際市場）")
     st.caption(
         "以 10Y Treasury Yield、VIX 與 SPY 200MA 建立透明的市場判定，"
-        "再將總額拆分為美元定存／短債、ETF 基金與精選美股個股。資料每小時更新。"
+        "再將資金動態拆分為美元定存／短債、美股核心 ETF、全球國際市場與精選美股個股。"
+        "資料每小時更新。"
     )
 
     try:
@@ -207,33 +212,33 @@ def render_portfolio_allocation_page() -> None:
         delta=f"${macro['spy_price'] - macro['spy_ma200']:+.2f} vs 200MA",
     )
 
-    risk_profile = st.selectbox(
-        "投資風格偏好",
-        ["穩健保守型", "平衡型", "積極成長型"],
-        index=0,
-        key="allocation_risk_profile",
+    regime, description, cash_pct, us_etf_pct, global_pct, stocks_pct = (
+        calculate_allocation(macro)
     )
-    regime, description, stocks_pct, etf_pct, cash_pct = calculate_allocation(
-        macro, risk_profile
-    )
-    profile_plan = [
+    allocation_plan = [
         {
             "資產類別": "美元定存／短債",
             "比例": cash_pct / 100,
             "建議標的": "SGOV / BIL",
-            "說明": "保本、流動性與等待再平衡機會",
+            "說明": "保本、流動性與等待再平衡機會。",
         },
         {
-            "資產類別": "ETF 基金",
-            "比例": etf_pct / 100,
-            "建議標的": "VOO / VIG",
-            "說明": "分散單一公司風險，作為核心配置",
+            "資產類別": "美股核心 ETF",
+            "比例": us_etf_pct / 100,
+            "建議標的": "VOO / QQQ / XLK",
+            "說明": "以美股大盤、納斯達克與科技板塊建立核心。",
+        },
+        {
+            "資產類別": "全球國際市場 (Global ADRs/ETFs)",
+            "比例": global_pct / 100,
+            "建議標的": "TSM / ASML / NVO / EWJ / EWT",
+            "說明": "依市場狀態配置 15%～20%，分散地理與幣別風險。",
         },
         {
             "資產類別": "精選美股個股",
             "比例": stocks_pct / 100,
-            "建議標的": "MSFT / NVDA",
-            "說明": "可帶入既有 7-Factor 模型做個別驗證",
+            "建議標的": "NVDA / MSFT / GOOGL",
+            "說明": "以既有 7-Factor 分析驗證個股品質與動能。",
         },
     ]
     st.markdown(
@@ -249,33 +254,34 @@ def render_portfolio_allocation_page() -> None:
 
     st.markdown("---")
     amount = st.number_input(
-        "請輸入預計投入總金額（USD）",
+        "預計投入總金額（USD）",
         min_value=1000.0,
         value=50000.0,
         step=5000.0,
         format="%.2f",
         key="allocation_amount",
     )
-    allocation_df = _allocation_table(profile_plan, amount)
-    st.subheader("🎯 三大資產類別具體分配")
+    allocation_df = _allocation_table(allocation_plan, amount)
+    st.subheader("🎯 四大資產類別具體分配")
     st.dataframe(
-        allocation_df.style.format({"建議金額 (USD)": "${:,.2f}"}),
+        allocation_df.drop(columns=["比例數值"]).style.format(
+            {"建議金額 (USD)": "${:,.2f}"}
+        ),
         use_container_width=True,
         hide_index=True,
     )
 
-    chart_df = allocation_df.copy()
-    chart_df["比例數值"] = [item["比例"] for item in profile_plan]
     fig = px.pie(
-        chart_df,
-        values="比例數值",
+        allocation_df,
+        values="建議金額 (USD)",
         names="資產類別",
         hole=0.55,
-        title=f"{risk_profile}｜建議資產配置比例",
+        title=f"{regime}｜四大資產配置比例",
         color="資產類別",
         color_discrete_map={
             "美元定存／短債": "#3FB950",
-            "ETF 基金": "#3498DB",
+            "美股核心 ETF": "#3498DB",
+            "全球國際市場 (Global ADRs/ETFs)": "#9B59B6",
             "精選美股個股": "#E74C3C",
         },
     )
@@ -294,14 +300,15 @@ def render_portfolio_allocation_page() -> None:
 
     st.subheader("🔎 建議標的快速診斷")
     st.caption(
-        "點擊標的會寫入 selected_ticker，並切換至既有個股診斷與 7-Factor 分析。"
+        "Global 類別包含 ADR 與國際 ETF；點擊任一標的會寫入 selected_ticker，"
+        "並切換至既有個股診斷與 7-Factor 分析。"
     )
     seen: set[str] = set()
-    for item in profile_plan:
+    for item in allocation_plan:
         st.markdown(
             f"**{item['資產類別']}｜{item['比例']:.0%}｜"
             f"${amount * item['比例']:,.2f} USD**　"
-            f"建議：`{item['建議標的']}`"
+            f"建議：`{item['建議標的']}`　{item['說明']}"
         )
         tickers = [ticker.strip() for ticker in item["建議標的"].split("/")]
         cols = st.columns(len(tickers))

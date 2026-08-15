@@ -1,0 +1,132 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import plotly.express as px
+
+# 1. 緩存抓取總體市場指標 (10Y Yield, VIX, SPY)
+@st.cache_data(ttl=3600)
+def fetch_macro_indicators():
+    tickers = ["^TNX", "^VIX", "SPY"]
+    df = yf.download(tickers, period="1y")["Close"]
+    
+    tnx_latest = float(df["^TNX"].iloc[-1])
+    vix_latest = float(df["^VIX"].iloc[-1])
+    spy_latest = float(df["SPY"].iloc[-1])
+    
+    spy_ma200 = float(df["SPY"].rolling(200).mean().iloc[-1])
+    spy_above_ma200 = spy_latest > spy_ma200
+    
+    return {
+        "tnx": round(tnx_latest, 2),
+        "vix": round(vix_latest, 2),
+        "spy_price": round(spy_latest, 2),
+        "spy_ma200": round(spy_ma200, 2),
+        "spy_above_ma200": spy_above_ma200
+    }
+
+# 2. 四大資產動態分配邏輯
+def calculate_allocation(macro):
+    vix = macro["vix"]
+    spy_bull = macro["spy_above_ma200"]
+    
+    if vix > 25:
+        regime = "高風險恐慌期 (High Risk / Offense Guard)"
+        desc = "市場恐慌指數偏高，建議提高現金與美債比重，全球國際市場配置以高股息/防守型為主。"
+        cash_pct, us_etf_pct, global_pct, stocks_pct = 45, 30, 15, 10
+    elif not spy_bull:
+        regime = "空頭/震盪調整期 (Bear / Correction Market)"
+        desc = "美股大盤跌破 200MA，適度分散至估值較低之歐洲 (ASML/NVO) 與日本 (EWJ) 市場。"
+        cash_pct, us_etf_pct, global_pct, stocks_pct = 35, 35, 15, 15
+    elif vix < 15 and spy_bull:
+        regime = "多頭牛市期 (Bullish Risk-On)"
+        desc = "全球風險偏好回升，提高美股個股與全球半導體/AI ADR (如台積電 TSM) 之配置。"
+        cash_pct, us_etf_pct, global_pct, stocks_pct = 10, 40, 20, 30
+    else:
+        regime = "溫和震盪期 (Neutral / Balanced Market)"
+        desc = "市場處於均衡狀態。維持 15% 國際市場比重，達成地理與幣別分散投資。"
+        cash_pct, us_etf_pct, global_pct, stocks_pct = 20, 40, 15, 25
+        
+    return regime, desc, cash_pct, us_etf_pct, global_pct, stocks_pct
+
+# 3. UI 渲染
+def render_portfolio_page():
+    st.title("🛡️ 穩健型資產配置策略 (含全球國際市場)")
+    st.caption("結合美股總體市場即時數據，將資金動態分配於「現金定存、美股ETF、全球ADR、精選個股」四大資產類別。")
+
+    with st.spinner("正在讀取總體市場宏觀數據..."):
+        try:
+            macro = fetch_macro_indicators()
+        except Exception as e:
+            st.error(f"宏觀數據讀取失敗: {e}")
+            return
+
+    # 展示宏觀指標
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("10年期美債收益率", f"{macro['tnx']}%")
+    m2.metric("VIX 恐慌指數", f"{macro['vix']}")
+    m3.metric("S&P 500 (SPY)", f"${macro['spy_price']}")
+    m4.metric("大盤技術位階", "多頭 (200MA之上)" if macro['spy_above_ma200'] else "空頭/修正 (200MA之下)")
+
+    st.markdown("---")
+
+    col_input, col_info = st.columns([1, 2])
+    with col_input:
+        st.subheader("💰 投資金流設定")
+        total_investment = st.number_input("預計投入總金額 (USD)", min_value=1000, value=50000, step=5000)
+
+    regime, desc, cash_pct, us_etf_pct, global_pct, stocks_pct = calculate_allocation(macro)
+
+    with col_info:
+        st.subheader(f"📊 當前市場判定：{regime}")
+        st.info(desc)
+
+    # 計算分配金額
+    cash_amt = total_investment * (cash_pct / 100)
+    us_etf_amt = total_investment * (us_etf_pct / 100)
+    global_amt = total_investment * (global_pct / 100)
+    stocks_amt = total_investment * (stocks_pct / 100)
+
+    st.markdown("---")
+    st.subheader("🎯 建議金額分配與四大資產標的")
+
+    c1, c2 = st.columns([1, 1])
+
+    with c1:
+        # Plotly 圓餅圖
+        alloc_df = pd.DataFrame({
+            "資產類別": [
+                "美元定存 / 美債 (Cash)", 
+                "美股核心 ETF (US ETFs)", 
+                "全球國際市場 (Global ADRs/ETFs)", 
+                "精選美股個股 (US Stocks)"
+            ],
+            "金額 (USD)": [cash_amt, us_etf_amt, global_amt, stocks_amt]
+        })
+        fig = px.pie(
+            alloc_df, 
+            values="金額 (USD)", 
+            names="資產類別", 
+            title="四大資產配置比例圖",
+            color_discrete_sequence=["#2ecc71", "#3498db", "#9b59b6", "#e74c3c"]
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c2:
+        st.write("### 💵 1. 美元定存 / 短債 (Cash & TBills)")
+        st.write(f"**建議配置：{cash_pct}% (${cash_amt:,.0f} USD)**")
+        st.caption("標的：`SGOV` (0-3月美債 ETF), `BIL` 或高利活存 (APY 4%+)。")
+
+        st.write("### 🧺 2. 美股核心 ETF (US Core ETFs)")
+        st.write(f"**建議配置：{us_etf_pct}% (${us_etf_amt:,.0f} USD)**")
+        st.caption("標的：`VOO` (S&P500), `QQQ` (納斯達克), `XLK` (科技板塊)。")
+
+        st.write("### 🌐 3. 全球國際市場 (Global ADRs/ETFs) 【新增】")
+        st.write(f"**建議配置：{global_pct}% (${global_amt:,.0f} USD)**")
+        st.caption("標的：`TSM` (台積電), `ASML` (阿斯麥), `NVO` (諾和諾德), `EWJ` (日本), `EWT` (台灣)。")
+
+        st.write("### 📈 4. 精選美股個股 (US Growth Stocks)")
+        st.write(f"**建議配置：{stocks_pct}% (${stocks_amt:,.0f} USD)**")
+        st.caption("標的：通過 7-Factor 診斷分數 > 75 分之強勢美股龍頭。")
+
+if __name__ == "__main__":
+    render_portfolio_page()
