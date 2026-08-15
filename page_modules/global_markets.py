@@ -10,7 +10,10 @@ import streamlit as st
 import yfinance as yf
 
 from analysis import classify_sentiment
-from data_fetcher import beijing_timestamp
+from data_fetcher import (
+    beijing_timestamp,
+    TIME_RANGE_OPTIONS, PERIOD_LABELS, _yf_period_params,
+)
 from navigation import navigate_to_ticker
 
 
@@ -111,63 +114,66 @@ def _close_frame(downloaded: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_global_performance() -> tuple[pd.DataFrame, float, str]:
-    """Fetch international ETFs and SPY once per hour and calculate returns."""
+def fetch_global_performance(period: str = "1y") -> tuple[pd.DataFrame, float | None, str]:
+    """Fetch international ETFs and SPY for *period* and compute total return.
+
+    *period* must be a TIME_RANGE_OPTIONS value (e.g. "1y", "3mo", "3y").
+    Returns (df, spy_return, timestamp) where df has columns:
+        國家／區域 | 代表 ETF | 報酬率 (%)
+    """
     tickers = GLOBAL_ETFS + ["SPY"]
     downloaded = yf.download(
         tickers=tickers,
-        period="1y",
         auto_adjust=False,
         progress=False,
         threads=False,
         group_by="column",
+        **_yf_period_params(period),
     )
     prices = _close_frame(downloaded, tickers)
-    missing = [ticker for ticker in tickers if ticker not in prices.columns]
+    missing = [t for t in tickers if t not in prices.columns]
     if missing:
         raise RuntimeError(f"國際市場 ETF 資料不完整：{', '.join(missing)}")
-    prices = prices.ffill().dropna(subset=tickers)
-    if len(prices) < 22:
+    prices = prices.ffill().dropna(how="all")
+    if len(prices) < 2:
         raise RuntimeError("Yahoo Finance 未返回足夠的國際市場歷史價格資料。")
 
+    base   = prices.iloc[0]
     latest = prices.iloc[-1]
 
-    def period_return(days: int) -> pd.Series:
-        base = prices.iloc[max(0, len(prices) - 1 - days)]
-        return (latest / base - 1) * 100
-
-    month = period_return(21)
-    quarter = period_return(63)
-    year = period_return(len(prices) - 1)
     rows = []
     for region, info in GLOBAL_MARKETS.items():
         etf = info["etf"]
-        rows.append(
-            {
-                "國家／區域": region,
-                "代表 ETF": etf,
-                "近 1 個月 (%)": round(float(month[etf]), 2),
-                "近 3 個月 (%)": round(float(quarter[etf]), 2),
-                "近 1 年 (%)": round(float(year[etf]), 2),
-            }
-        )
-    return pd.DataFrame(rows), round(float(month["SPY"]), 2), beijing_timestamp()
+        if etf not in prices.columns:
+            continue
+        b, l = float(base[etf]), float(latest[etf])
+        ret  = round((l / b - 1) * 100, 2) if b != 0 else float("nan")
+        rows.append({"國家／區域": region, "代表 ETF": etf, "報酬率 (%)": ret})
+
+    spy_return: float | None = None
+    if "SPY" in prices.columns:
+        sb, sl = float(base["SPY"]), float(latest["SPY"])
+        if sb != 0 and pd.notna(sl):
+            spy_return = round((sl / sb - 1) * 100, 2)
+
+    return pd.DataFrame(rows), spy_return, beijing_timestamp()
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_all_etf_comparison(period: str = "1y") -> pd.DataFrame:
     """Fetch all region ETFs + SPY, normalize each series to 100 at first date.
 
+    *period* is any TIME_RANGE_OPTIONS value (e.g. "1y", "3y", "10y").
     Returns a long-format DataFrame: 日期 | 標準化指數 | 市場 | ETF
     """
     comparison_tickers = GLOBAL_ETFS + ["SPY"]
     downloaded = yf.download(
         tickers=comparison_tickers,
-        period=period,
         auto_adjust=False,
         progress=False,
         threads=False,
         group_by="column",
+        **_yf_period_params(period),
     )
     prices = _close_frame(downloaded, comparison_tickers)
     if prices.empty:
@@ -202,14 +208,17 @@ def fetch_all_etf_comparison(period: str = "1y") -> pd.DataFrame:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_market_history(ticker: str, period: str = "5y") -> pd.DataFrame:
-    """Fetch one selected region ETF's historical Close series."""
+    """Fetch one selected region ETF's historical Close series.
+
+    *period* is any TIME_RANGE_OPTIONS value (e.g. "1y", "3y", "5y").
+    """
     downloaded = yf.download(
         tickers=[ticker],
-        period=period,
         auto_adjust=False,
         progress=False,
         threads=False,
         group_by="column",
+        **_yf_period_params(period),
     )
     prices = _close_frame(downloaded, [ticker])
     if ticker not in prices.columns or prices[ticker].dropna().empty:
@@ -301,27 +310,26 @@ def render_global_markets_page() -> None:
         "並從美股上市的 ADR／跨境企業白名單搭配新聞情緒尋找研究起點。資料每小時更新。"
     )
 
+    selected_rank_label = st.radio(
+        "選擇排行榜時間範圍",
+        PERIOD_LABELS,
+        index=PERIOD_LABELS.index("1年"),
+        horizontal=True,
+        key="global_market_period",
+    )
     try:
-        with st.spinner("正在讀取國際市場最新行情…"):
-            performance_df, spy_month, loaded_at = fetch_global_performance()
+        with st.spinner(f"正在讀取 {selected_rank_label} 國際市場行情…"):
+            performance_df, spy_return, loaded_at = fetch_global_performance(
+                TIME_RANGE_OPTIONS[selected_rank_label]
+            )
     except Exception as exc:
         st.error(f"國際市場數據讀取失敗：{exc}")
         st.info("請稍後重新整理；Yahoo Finance 限流或資料不完整時不會使用假資料。")
         return
 
     st.caption(f"⏱ 國際市場資料載入：{loaded_at}｜分析完成：{beijing_timestamp()}")
-    periods = {
-        "近 1 個月": "近 1 個月 (%)",
-        "近 3 個月": "近 3 個月 (%)",
-        "近 1 年": "近 1 年 (%)",
-    }
-    selected_period = st.radio(
-        "選擇排行榜時間範圍",
-        list(periods),
-        horizontal=True,
-        key="global_market_period",
-    )
-    metric = periods[selected_period]
+
+    metric = "報酬率 (%)"
     sorted_df = performance_df.sort_values(metric, ascending=False).reset_index(drop=True)
 
     fig = px.bar(
@@ -331,7 +339,7 @@ def render_global_markets_page() -> None:
         orientation="h",
         color=metric,
         color_continuous_scale="Viridis",
-        title=f"六大國際市場 ETF 報酬率（{selected_period}）",
+        title=f"各國際市場 ETF 報酬率排行榜（{selected_rank_label}）",
         labels={metric: "報酬率 (%)", "國家／區域": ""},
     )
     fig.update_layout(
@@ -344,28 +352,29 @@ def render_global_markets_page() -> None:
         margin=dict(l=0, r=10, t=55, b=20),
     )
     st.plotly_chart(fig, use_container_width=True)
-    st.caption(f"SPY 同期報酬：{spy_month:+.2f}%（美股基準）")
+    if spy_return is not None:
+        st.caption(f"SPY 同期報酬：{spy_return:+.2f}%（美股基準）")
 
     # ── 跨市場標準化走勢比較圖 ─────────────────────────────────────────────────
     st.markdown("---")
     st.subheader("📈 全市場 ETF 標準化走勢比較")
     st.caption("以各 ETF 在所選時間範圍起始日的收盤價為基準（= 100），直接比較各市場的相對報酬。SPY 虛線為美股基準。")
-    _period_options = {"近 1 年": "1y", "近 3 年": "3y", "近 5 年": "5y"}
-    _comparison_period = st.radio(
+    _comparison_label = st.radio(
         "比較時間範圍",
-        list(_period_options),
+        PERIOD_LABELS,
+        index=PERIOD_LABELS.index("1年"),
         horizontal=True,
         key="global_comparison_period",
     )
     try:
         with st.spinner("正在載入跨市場走勢資料…"):
-            comparison_df = fetch_all_etf_comparison(_period_options[_comparison_period])
+            comparison_df = fetch_all_etf_comparison(TIME_RANGE_OPTIONS[_comparison_label])
         fig_compare = px.line(
             comparison_df,
             x="日期",
             y="標準化指數",
             color="市場",
-            title=f"各國市場 ETF 與美股（SPY）標準化走勢（{_comparison_period}，起始 = 100）",
+            title=f"各國市場 ETF 與美股（SPY）標準化走勢（{_comparison_label}，起始 = 100）",
             labels={"標準化指數": "標準化指數（起始=100）", "日期": "", "市場": "市場"},
         )
         # SPY line → dashed, slightly thicker for visibility
@@ -393,13 +402,20 @@ def render_global_markets_page() -> None:
     )
     region = GLOBAL_MARKETS[selected_region]
     st.info(f"**市場簡介：** {region['description']}")
+    _hist_label = st.radio(
+        "個別 ETF 歷史走勢時間範圍",
+        PERIOD_LABELS,
+        index=PERIOD_LABELS.index("5年"),
+        horizontal=True,
+        key="global_single_etf_period",
+    )
     try:
-        history_df = fetch_market_history(region["etf"])
+        history_df = fetch_market_history(region["etf"], TIME_RANGE_OPTIONS[_hist_label])
         history_fig = px.line(
             history_df,
             x="日期",
             y="收盤價",
-            title=f"{selected_region}｜{region['etf']} 五年歷史走勢",
+            title=f"{selected_region}｜{region['etf']} 歷史走勢（{_hist_label}）",
             labels={"收盤價": "收盤價（USD）", "日期": ""},
         )
         history_fig.update_layout(

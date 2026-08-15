@@ -51,6 +51,48 @@ _HKD_RATE_FALLBACK   =  7.85  # used only when live fetch fails
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
+# ── Time range options (shared across all chart pages) ────────────────────────
+# Maps display label → yfinance period string.
+# "3y" is handled specially by _yf_period_params() because yfinance has no
+# native "3y" period; all others pass through as-is.
+TIME_RANGE_OPTIONS: dict[str, str] = {
+    "1天":   "1d",
+    "1週":   "5d",
+    "1個月": "1mo",
+    "3個月": "3mo",
+    "6個月": "6mo",
+    "1年":   "1y",
+    "3年":   "3y",
+    "5年":   "5y",
+    "10年":  "10y",
+}
+PERIOD_LABELS: list[str] = list(TIME_RANGE_OPTIONS)
+
+
+def _yf_period_params(period: str) -> dict:
+    """Convert a TIME_RANGE_OPTIONS period code to yfinance download kwargs.
+
+    - "1d"  → ``{"period": "1d", "interval": "1h"}`` so we get ~7 intraday bars
+              instead of just one daily bar (yfinance returns only 1 row for
+              period="1d" at the default daily interval).
+    - "3y"  → ``{"start": ..., "end": ...}`` because yfinance has no native 3-year
+              period string; dates are computed so the cache key is stable per day.
+    - All other codes pass through as ``{"period": period}``.
+    """
+    if period == "1d":
+        return {"period": "1d", "interval": "1h"}
+    if period == "3y":
+        from datetime import date
+        end = date.today()
+        try:
+            start = end.replace(year=end.year - 3)
+        except ValueError:
+            # Feb 29 on a non-leap target year
+            start = end.replace(year=end.year - 3, day=28)
+        return {"start": start.isoformat(), "end": end.isoformat()}
+    return {"period": period}
+
+
 SCREENER_STOCKS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "BRK-B",
     "UNH", "JNJ", "JPM", "V", "PG", "HD", "CVX", "MRK", "ABBV", "PEP",
@@ -499,8 +541,14 @@ def get_factor_data(ticker: str) -> dict:
 
 
 def get_historical_data(ticker: str, period: str = "1y") -> pd.DataFrame | None:
+    """Fetch OHLCV history for *ticker* over *period*.
+
+    Accepts any key from TIME_RANGE_OPTIONS (including "3y" which is translated
+    to start/end parameters because yfinance has no native 3-year period).
+    """
     try:
-        df = yf.Ticker(ticker).history(period=period)
+        params = _yf_period_params(period)
+        df = yf.Ticker(ticker).history(**params)
         return standardize_timezone(df)
     except Exception as e:
         print(_err("get_historical_data", e))
@@ -648,18 +696,21 @@ def get_vix_history(lookback: int = 63) -> pd.DataFrame:
 
 @st.cache_data(ttl=900)
 def get_market_benchmark(ticker: str, period: str = "1y") -> dict:
+    """Fetch benchmark ETF history + SMA50/SMA200 + golden cross flag.
+
+    Short periods (1d / 5d / 1mo …) and "3y" are handled via
+    ``_yf_period_params`` so the correct yfinance kwargs are used in every case.
+    SMA and golden-cross fields are computed only when there are enough rows;
+    short-period calls still succeed and return a valid ``hist`` and ``perf_1y``.
     """
-    Fetch benchmark ETF history + SMA50/SMA200 + golden cross flag.
-    Raises RuntimeError on insufficient data so @st.cache_data never caches
-    a result with golden_cross=None (which would persist "載入中" for 15 min).
-    """
-    hist = yf.Ticker(ticker).history(period=period)
+    params = _yf_period_params(period)
+    hist   = yf.Ticker(ticker).history(**params)
     if hist is None or hist.empty:
         raise RuntimeError(f"get_market_benchmark: no data returned for {ticker}")
     hist = standardize_timezone(hist)
-    if len(hist) < 50:
+    if len(hist) < 2:
         raise RuntimeError(
-            f"get_market_benchmark: only {len(hist)} rows for {ticker}; need ≥50"
+            f"get_market_benchmark: only {len(hist)} rows for {ticker}; need ≥2"
         )
     result: dict = {
         "ticker": ticker, "label": BENCHMARK_LABELS.get(ticker, ticker),
@@ -670,7 +721,9 @@ def get_market_benchmark(ticker: str, period: str = "1y") -> dict:
     result["perf_1y"] = float(
         (hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1) * 100
     )
-    result["sma50"] = float(hist["Close"].rolling(50).mean().iloc[-1])
+    # SMA fields are optional — only available for long-enough histories
+    if len(hist) >= 50:
+        result["sma50"] = float(hist["Close"].rolling(50).mean().iloc[-1])
     if len(hist) >= 200:
         result["sma200"] = float(hist["Close"].rolling(200).mean().iloc[-1])
     if result["sma50"] is not None and result["sma200"] is not None:

@@ -9,7 +9,10 @@ import plotly.express as px
 import streamlit as st
 import yfinance as yf
 
-from data_fetcher import beijing_timestamp
+from data_fetcher import (
+    beijing_timestamp,
+    TIME_RANGE_OPTIONS, PERIOD_LABELS, _yf_period_params,
+)
 from navigation import navigate_to_ticker
 
 
@@ -97,47 +100,50 @@ def _close_frame(downloaded: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_sector_performance() -> tuple[pd.DataFrame, float | None, str]:
-    """Fetch sector ETF and SPY prices once per hour and calculate returns."""
+def fetch_sector_performance(period: str = "1y") -> tuple[pd.DataFrame, float | None, str]:
+    """Fetch sector ETF and SPY prices for *period* and compute total return.
+
+    *period* must be a value from TIME_RANGE_OPTIONS (e.g. "1y", "3mo", "3y").
+    Returns (df, spy_return, timestamp) where df has columns:
+        板塊名稱 | ETF | 報酬率 (%)
+    """
     tickers = SECTOR_ETFS + ["SPY"]
+    dl_kwargs = _yf_period_params(period)
     downloaded = yf.download(
         tickers=tickers,
-        period="1y",
         auto_adjust=False,
         progress=False,
         threads=False,
         group_by="column",
+        **dl_kwargs,
     )
     prices = _close_frame(downloaded, tickers)
-    if prices.empty or len(prices) < 22:
+    if prices.empty or len(prices) < 2:
         raise RuntimeError("Yahoo Finance 未返回足夠的板塊歷史價格資料。")
 
-    prices = prices.ffill()
+    prices = prices.ffill().dropna(how="all")
+    base   = prices.iloc[0]
     latest = prices.iloc[-1]
 
-    def _return(days: int) -> pd.Series:
-        base = prices.iloc[max(0, len(prices) - 1 - days)]
-        return (latest / base - 1) * 100
-
-    m1, m3, y1 = _return(21), _return(63), _return(len(prices) - 1)
     rows = []
     for sector_name, info in SECTOR_DATA.items():
         etf = info["etf"]
         if etf not in prices.columns:
             continue
-        rows.append(
-            {
-                "板塊名稱": sector_name,
-                "ETF": etf,
-                "近1個月 (%)": round(float(m1.get(etf, float("nan"))), 2),
-                "近3個月 (%)": round(float(m3.get(etf, float("nan"))), 2),
-                "近1年 (%)": round(float(y1.get(etf, float("nan"))), 2),
-            }
-        )
+        b, l = float(base[etf]), float(latest[etf])
+        ret  = round((l / b - 1) * 100, 2) if b != 0 else float("nan")
+        rows.append({"板塊名稱": sector_name, "ETF": etf, "報酬率 (%)": ret})
+
     if not rows:
         raise RuntimeError("板塊 ETF 價格資料不完整，暫時無法計算排行榜。")
-    spy_m1 = float(m1["SPY"]) if "SPY" in m1 and pd.notna(m1["SPY"]) else None
-    return pd.DataFrame(rows), spy_m1, beijing_timestamp()
+
+    spy_return: float | None = None
+    if "SPY" in prices.columns:
+        sb, sl = float(base["SPY"]), float(latest["SPY"])
+        if sb != 0 and pd.notna(sl):
+            spy_return = round((sl / sb - 1) * 100, 2)
+
+    return pd.DataFrame(rows), spy_return, beijing_timestamp()
 
 
 def _render_diagnosis_button(ticker: str, key: str) -> None:
@@ -152,29 +158,26 @@ def render_sector_analysis_page() -> None:
         " 價格資料每小時更新一次。"
     )
 
+    selected_label = st.radio(
+        "選擇排行榜時間範圍",
+        PERIOD_LABELS,
+        index=PERIOD_LABELS.index("1年"),
+        horizontal=True,
+        key="sector_period",
+    )
+    yf_period = TIME_RANGE_OPTIONS[selected_label]
+
     try:
-        with st.spinner("正在讀取最新板塊數據…"):
-            perf_df, spy_m1, loaded_at = fetch_sector_performance()
+        with st.spinner(f"正在讀取 {selected_label} 板塊數據…"):
+            perf_df, spy_return, loaded_at = fetch_sector_performance(yf_period)
     except Exception as exc:
         st.error(f"板塊數據讀取失敗：{exc}")
         st.info("可稍後重新整理；Yahoo Finance 暫時限流時不會寫入錯誤快取。")
         return
 
-    st.caption(
-        f"⏱ 板塊資料載入：{loaded_at}｜分析完成：{beijing_timestamp()}"
-    )
-    periods = {
-        "近 1 個月": "近1個月 (%)",
-        "近 3 個月": "近3個月 (%)",
-        "近 1 年": "近1年 (%)",
-    }
-    selected_period = st.radio(
-        "選擇排行榜時間範圍",
-        list(periods),
-        horizontal=True,
-        key="sector_period",
-    )
-    metric_col = periods[selected_period]
+    st.caption(f"⏱ 板塊資料載入：{loaded_at}｜分析完成：{beijing_timestamp()}")
+
+    metric_col = "報酬率 (%)"
     sorted_df = perf_df.sort_values(metric_col, ascending=False).reset_index(drop=True)
 
     fig = px.bar(
@@ -184,7 +187,7 @@ def render_sector_analysis_page() -> None:
         orientation="h",
         color=metric_col,
         color_continuous_scale="RdYlGn",
-        title=f"美股板塊報酬率排行榜（{selected_period}）",
+        title=f"美股板塊報酬率排行榜（{selected_label}）",
         labels={metric_col: "報酬率 (%)", "板塊名稱": ""},
     )
     fig.update_layout(
@@ -200,8 +203,8 @@ def render_sector_analysis_page() -> None:
 
     st.markdown("---")
     st.subheader("🔥 當前熱門板塊與精選標的")
-    if spy_m1 is not None:
-        st.caption(f"SPY 近 1 個月報酬：{spy_m1:+.2f}%（熱門板塊卡片以此作為短期基準）")
+    if spy_return is not None:
+        st.caption(f"SPY {selected_label}報酬：{spy_return:+.2f}%（熱門板塊卡片以此作為基準）")
 
     top_3 = sorted_df.head(3)
     card_cols = st.columns(len(top_3))
@@ -209,19 +212,15 @@ def render_sector_analysis_page() -> None:
         data = SECTOR_DATA[row["板塊名稱"]]
         with card_cols[idx]:
             delta = (
-                row["近1個月 (%)"] - spy_m1
-                if spy_m1 is not None
+                row["報酬率 (%)"] - spy_return
+                if spy_return is not None
                 else None
             )
             st.success(f"**第 {idx + 1} 名：{row['板塊名稱']}**")
             st.metric(
-                "近 1 個月",
-                f"{row['近1個月 (%)']:+.2f}%",
+                f"期間報酬 ({selected_label})",
+                f"{row['報酬率 (%)']:+.2f}%",
                 delta=f"{delta:+.2f}% vs SPY" if delta is not None else None,
-            )
-            st.caption(
-                f"3M {row['近3個月 (%)']:+.2f}%　｜　"
-                f"1Y {row['近1年 (%)']:+.2f}%"
             )
             st.markdown("**代表性 ETF**")
             for etf in data["top_etfs"]:
@@ -237,13 +236,7 @@ def render_sector_analysis_page() -> None:
     st.markdown("---")
     st.subheader("📋 11 大板塊完整數據")
     st.dataframe(
-        sorted_df.style.format(
-            {
-                "近1個月 (%)": "{:+.2f}%",
-                "近3個月 (%)": "{:+.2f}%",
-                "近1年 (%)": "{:+.2f}%",
-            }
-        ),
+        sorted_df.style.format({"報酬率 (%)": "{:+.2f}%"}),
         use_container_width=True,
         hide_index=True,
     )

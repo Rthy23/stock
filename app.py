@@ -33,6 +33,7 @@ from data_fetcher import (
     beijing_timestamp,
     SCREENER_STOCKS, BENCHMARK_LABELS, SECTOR_ETFS,
     fetch_macro_events,
+    TIME_RANGE_OPTIONS, PERIOD_LABELS,
 )
 from ui_components import (
     init_session, navigate_to_diagnosis,
@@ -883,7 +884,12 @@ def main() -> None:
                 value=_diag_default,
             ).upper().strip()
         with col_period:
-            period = st.selectbox("歷史數據", ["1y", "6mo", "2y", "5y"], index=0)
+            _period_label = st.selectbox(
+                "歷史數據",
+                PERIOD_LABELS,
+                index=PERIOD_LABELS.index("1年"),
+            )
+            period = TIME_RANGE_OPTIONS[_period_label]
         with col_btn:
             analyze_btn = st.button("🩺 診斷分析", type="primary",
                                     use_container_width=True)
@@ -1258,11 +1264,14 @@ def main() -> None:
                 )
                 try:
                     with st.spinner(f"載入 {_sect_etf_ticker} 板塊數據…"):
-                        _sect_bm   = get_market_benchmark(_sect_etf_ticker, "1y")
-                        _sect_hist = _sect_bm.get("hist")
-                    if _sect_hist is not None and hist is not None and not hist.empty:
+                        _sect_bm      = get_market_benchmark(_sect_etf_ticker, period)
+                        _sect_hist    = _sect_bm.get("hist")
+                        # Fetch stock history aligned to current period selector so
+                        # both series have matching timestamps (critical for 1d/3y).
+                        _sect_stk_hist = get_historical_data(ticker, period)
+                    if _sect_hist is not None and _sect_stk_hist is not None and not _sect_stk_hist.empty:
                         _sf, _sa, _so, _sr = plot_relative_strength(
-                            hist, _sect_hist, ticker, _sect_etf_ticker
+                            _sect_stk_hist, _sect_hist, ticker, _sect_etf_ticker
                         )
                         if _sf:
                             _sa_sign  = f"{_sa:+.1f}%" if _sa is not None else "N/A"
@@ -1278,7 +1287,7 @@ def main() -> None:
                                 unsafe_allow_html=True,
                             )
                             st.plotly_chart(_sf, use_container_width=True,
-                                            key=f"sect_{ticker}_1y")
+                                            key=f"sect_{ticker}_{period}")
                     else:
                         st.caption(f"⏳ {_sect_etf_ticker} 板塊數據暫不可用。")
                 except Exception:
@@ -1368,23 +1377,29 @@ def main() -> None:
                     f"　兩者起始均設為 0%，直接看超額報酬。"
                 )
             with hdr_r6:
-                rs_period = st.selectbox(
+                # Map stored period code → display label for default selection
+                _yf_to_label = {v: k for k, v in TIME_RANGE_OPTIONS.items()}
+                _rs_default   = _yf_to_label.get(diag_period, "1年")
+                _rs_label = st.selectbox(
                     "比較區間",
-                    ["1y", "6mo", "2y"],
-                    index=["1y", "6mo", "2y"].index(diag_period)
-                         if diag_period in ["1y", "6mo", "2y"] else 0,
+                    PERIOD_LABELS,
+                    index=PERIOD_LABELS.index(_rs_default),
                     key="rs_period",
                 )
+                rs_period = TIME_RANGE_OPTIONS[_rs_label]
 
             try:
-                with st.spinner(f"載入 {bm_ticker} 數據…"):
+                with st.spinner(f"載入 {bm_ticker} / {ticker} {_rs_label} 數據…"):
                     bm_rs      = get_market_benchmark(bm_ticker, rs_period)
                     bm_hist_rs = bm_rs.get("hist")
+                    # Always fetch the stock's own history for the *same* RS period
+                    # so the comparison window is truly aligned with the selector.
+                    hist_rs    = get_historical_data(ticker, rs_period)
                 _rs_loaded_at = beijing_timestamp()
 
-                if bm_hist_rs is not None and hist is not None and not hist.empty:
+                if bm_hist_rs is not None and hist_rs is not None and not hist_rs.empty:
                     rs_fig, alpha_pct, is_out, stock_ret = plot_relative_strength(
-                        hist, bm_hist_rs, ticker, bm_ticker
+                        hist_rs, bm_hist_rs, ticker, bm_ticker
                     )
                     st.caption(
                         f"⏱ 相對強弱資料載入：{_rs_loaded_at}｜"
@@ -1539,13 +1554,12 @@ def main() -> None:
             def _section_comparison():
                 st.markdown("---")
                 st.markdown("### 📅 歷史表現對比分析")
-                _PERIOD_MAP = {"6M": "6mo", "1Y": "1y", "3Y": "3y", "5Y": "5y", "10Y": "10y"}
                 _sel_period = st.radio(
-                    "選擇時間區間", list(_PERIOD_MAP.keys()),
-                    index=1, horizontal=True,
+                    "選擇時間區間", PERIOD_LABELS,
+                    index=PERIOD_LABELS.index("1年"), horizontal=True,
                     key=f"hist_compare_period_{ticker}",
                 )
-                _yf_period   = _PERIOD_MAP[_sel_period]
+                _yf_period   = TIME_RANGE_OPTIONS[_sel_period]
                 _bm_ticker_c = st.session_state.get("benchmark", "VOO")
                 with st.spinner(f"載入 {_sel_period} 歷史數據…"):
                     _comp_hist = get_historical_data(ticker, _yf_period)
