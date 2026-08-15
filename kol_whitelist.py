@@ -19,6 +19,7 @@ import streamlit as st
 from user_config import load_kol_whitelist
 from kol_config import ANALYST_DIRECTORY
 from navigation import navigate_to_ticker
+import picks_store as _picks_store
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 1. WHITELIST — 手工篩選高信譽分析師
@@ -405,7 +406,7 @@ def score_picks(
     同一 ticker 的多筆合計，並記錄推薦專家清單。
     """
     if picks is None:
-        picks = PICKS_DATA
+        picks = _picks_store.load_picks()
     active_whitelist = whitelist if whitelist is not None else WHITELIST
     active_whitelist_map = {k["id"]: k for k in active_whitelist}
 

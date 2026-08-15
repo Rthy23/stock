@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -11,8 +12,9 @@ import yfinance as yf
 
 from data_fetcher import beijing_timestamp
 from kol_config import ANALYST_DIRECTORY
-from kol_whitelist import PICKS_DATA, build_consensus_table
+from kol_whitelist import build_consensus_table
 from navigation import navigate_to_ticker
+import picks_store
 
 
 RATING_WEIGHTS: dict[str, int] = {
@@ -185,15 +187,220 @@ def _render_diagnosis_buttons(tickers: list[str], key_prefix: str) -> None:
                 navigate_to_ticker(ticker)
 
 
+def _freshness_badge(days_old: int) -> str:
+    """Return an emoji freshness label based on pick age."""
+    if days_old < 0:
+        return "❓ 日期異常"
+    if days_old <= 7:
+        return f"🟢 {days_old}天前"
+    if days_old <= 14:
+        return f"🟡 {days_old}天前"
+    if days_old <= 30:
+        return f"🟠 {days_old}天前"
+    return f"🔴 {days_old}天前（過期）"
+
+
+def _render_picks_manager() -> None:
+    """Expander UI for viewing, adding, and deleting analyst picks."""
+    all_picks = picks_store.get_picks_with_status()
+    total = len(all_picks)
+    expired = sum(1 for p in all_picks if p.get("is_expired"))
+
+    expander_label = (
+        f"🛠 管理推薦記錄（共 {total} 筆"
+        + (f"，⚠️ {expired} 筆已過期" if expired else "")
+        + "）"
+    )
+    with st.expander(expander_label, expanded=False):
+        # ── 新增推薦 ──────────────────────────────────────────────────────────
+        st.markdown("#### ➕ 新增推薦記錄")
+        analyst_options = {a["name"]: a["id"] for a in ANALYST_DIRECTORY}
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            selected_name = st.selectbox(
+                "分析師",
+                list(analyst_options.keys()),
+                key="pm_analyst",
+            )
+        with col2:
+            new_ticker = st.text_input(
+                "Ticker",
+                placeholder="如 AAPL",
+                key="pm_ticker",
+            ).strip().upper()
+
+        col3, col4 = st.columns([1, 1])
+        with col3:
+            new_date = st.date_input(
+                "推薦日期",
+                value=datetime.now().date(),
+                key="pm_date",
+            )
+        with col4:
+            quality_map = {
+                "3 — 強論點（含財報/護城河/估值）": 3,
+                "2 — 中等（觀點有據但不夠詳細）": 2,
+                "1 — 薄弱（標題黨/無數據支撐）": 1,
+            }
+            quality_label = st.selectbox(
+                "論點品質",
+                list(quality_map.keys()),
+                key="pm_quality",
+            )
+
+        new_thesis = st.text_area(
+            "投資論點（thesis）",
+            placeholder="請說明推薦理由，建議包含估值、護城河或財報數據…",
+            height=90,
+            key="pm_thesis",
+        )
+
+        if st.button("✅ 新增此推薦", key="pm_add_btn", use_container_width=True):
+            if not new_ticker:
+                st.error("請填寫 Ticker 代碼。")
+            elif not new_thesis.strip():
+                st.error("請填寫投資論點。")
+            else:
+                try:
+                    picks_store.add_pick({
+                        "kol_id":           analyst_options[selected_name],
+                        "ticker":           new_ticker,
+                        "date":             str(new_date),
+                        "argument_quality": quality_map[quality_label],
+                        "thesis":           new_thesis.strip(),
+                    })
+                    st.success(f"✅ 已新增 {selected_name} 對 {new_ticker} 的推薦！")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"新增失敗：{exc}")
+
+        st.markdown("---")
+
+        # ── 清除過期 ─────────────────────────────────────────────────────────
+        col_purge, col_info = st.columns([1, 3])
+        with col_purge:
+            if st.button(
+                f"🗑 清除 {expired} 筆過期推薦（>30天）",
+                key="pm_purge_btn",
+                disabled=expired == 0,
+                use_container_width=True,
+            ):
+                _, removed = picks_store.purge_expired_picks(days=30)
+                st.success(f"已移除 {removed} 筆超過 30 天的過期推薦。")
+                st.rerun()
+        with col_info:
+            st.caption(
+                "過期推薦仍會被計入共識排行榜（權重 ×0.1），"
+                "清除後將完全從計算中移除。"
+            )
+
+        st.markdown("---")
+
+        # ── 現有推薦列表 ───────────────────────────────────────────────────────
+        st.markdown("#### 📋 現有推薦記錄")
+        if not all_picks:
+            st.info("目前沒有推薦記錄。")
+            return
+
+        # Build analyst id → name lookup
+        id_to_name = {a["id"]: a["name"] for a in ANALYST_DIRECTORY}
+
+        # Group tabs: active vs expired
+        tab_active, tab_expired = st.tabs([
+            f"✅ 有效推薦（{total - expired}）",
+            f"⚠️ 過期推薦（{expired}）",
+        ])
+
+        def _render_pick_rows(picks_subset: list, offset: int) -> None:
+            for local_i, p in enumerate(picks_subset):
+                real_idx = offset + local_i
+                analyst_name = id_to_name.get(p["kol_id"], p["kol_id"])
+                badge = _freshness_badge(p.get("days_old", -1))
+                quality_icons = {3: "💪", 2: "📊", 1: "⚠️"}
+                q_icon = quality_icons.get(p.get("argument_quality", 0), "❓")
+                row_cols = st.columns([2, 1, 2, 5, 1])
+                row_cols[0].markdown(f"**{analyst_name}**")
+                row_cols[1].markdown(f"`{p['ticker']}`")
+                row_cols[2].markdown(badge)
+                row_cols[3].caption(f"{q_icon} {p.get('thesis', '')[:80]}{'…' if len(p.get('thesis','')) > 80 else ''}")
+                if row_cols[4].button("🗑", key=f"pm_del_{real_idx}", help="刪除此推薦"):
+                    try:
+                        picks_store.delete_pick(real_idx)
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"刪除失敗：{exc}")
+
+        with tab_active:
+            active_with_idx = [
+                (i, p) for i, p in enumerate(all_picks) if not p.get("is_expired")
+            ]
+            if active_with_idx:
+                st.markdown(
+                    "<small style='color:#8B949E'>分析師 ／ Ticker ／ 新鮮度 ／ 論點摘要</small>",
+                    unsafe_allow_html=True,
+                )
+                for real_idx, p in active_with_idx:
+                    analyst_name = id_to_name.get(p["kol_id"], p["kol_id"])
+                    badge = _freshness_badge(p.get("days_old", -1))
+                    quality_icons = {3: "💪", 2: "📊", 1: "⚠️"}
+                    q_icon = quality_icons.get(p.get("argument_quality", 0), "❓")
+                    row_cols = st.columns([2, 1, 2, 5, 1])
+                    row_cols[0].markdown(f"**{analyst_name}**")
+                    row_cols[1].markdown(f"`{p['ticker']}`")
+                    row_cols[2].markdown(badge)
+                    row_cols[3].caption(f"{q_icon} {p.get('thesis', '')[:80]}{'…' if len(p.get('thesis','')) > 80 else ''}")
+                    if row_cols[4].button("🗑", key=f"pm_del_{real_idx}", help="刪除此推薦"):
+                        try:
+                            picks_store.delete_pick(real_idx)
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"刪除失敗：{exc}")
+            else:
+                st.info("目前沒有有效推薦。")
+
+        with tab_expired:
+            expired_with_idx = [
+                (i, p) for i, p in enumerate(all_picks) if p.get("is_expired")
+            ]
+            if expired_with_idx:
+                st.caption("以下推薦超過 30 天，在共識計算中權重已降至 ×0.1。")
+                for real_idx, p in expired_with_idx:
+                    analyst_name = id_to_name.get(p["kol_id"], p["kol_id"])
+                    badge = _freshness_badge(p.get("days_old", -1))
+                    quality_icons = {3: "💪", 2: "📊", 1: "⚠️"}
+                    q_icon = quality_icons.get(p.get("argument_quality", 0), "❓")
+                    row_cols = st.columns([2, 1, 2, 5, 1])
+                    row_cols[0].markdown(f"**{analyst_name}**")
+                    row_cols[1].markdown(f"`{p['ticker']}`")
+                    row_cols[2].markdown(badge)
+                    row_cols[3].caption(f"{q_icon} {p.get('thesis', '')[:80]}{'…' if len(p.get('thesis','')) > 80 else ''}")
+                    if row_cols[4].button("🗑", key=f"pm_del_{real_idx}", help="刪除此推薦"):
+                        try:
+                            picks_store.delete_pick(real_idx)
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"刪除失敗：{exc}")
+            else:
+                st.info("目前沒有過期推薦。")
+
+
 def _render_curated_consensus() -> None:
     st.subheader("⭐ 精選分析師白名單共識")
+
+    # Load picks freshness summary for the caption
+    all_picks = picks_store.get_picks_with_status()
+    expired_count = sum(1 for p in all_picks if p.get("is_expired"))
+    fresh_count = len(all_picks) - expired_count
+
     st.caption(
-        f"目前依 {len(ANALYST_DIRECTORY)} 位精選分析師的推薦，"
-        "使用信譽 × 論點品質 × 時效性加權；資料來源與既有總體市場共識模組同步。"
+        f"目前依 {len(ANALYST_DIRECTORY)} 位精選分析師的推薦（共 {len(all_picks)} 筆，"
+        f"🟢 {fresh_count} 筆有效 / 🔴 {expired_count} 筆過期），"
+        "使用信譽 × 論點品質 × 時效性加權；可透過下方管理介面新增或刪除推薦。"
     )
     ranked = build_consensus_table(whitelist=ANALYST_DIRECTORY)
     if not ranked:
         st.info("目前沒有可用的精選分析師推薦資料。")
+        _render_picks_manager()
         return
 
     all_rows = [
@@ -221,6 +428,8 @@ def _render_curated_consensus() -> None:
         all_tickers[:8],
         "curated_consensus_diag",
     )
+
+    _render_picks_manager()
 
 
 def render_analyst_consensus_page() -> None:
