@@ -290,6 +290,92 @@ PICKS_DATA: List[Dict] = [
 # immediately in the Macro page.
 WHITELIST_MAP: Dict[str, Dict] = {k["id"]: k for k in WHITELIST}
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 一致性檢查 — 確保 ANALYST_DIRECTORY 與 PICKS_DATA 同步
+# ──────────────────────────────────────────────────────────────────────────────
+
+def validate_picks_coverage(
+    directory: List[Dict] | None = None,
+    picks: List[Dict] | None = None,
+    *,
+    warn: bool = True,
+) -> tuple[set[str], set[str]]:
+    """Compare ANALYST_DIRECTORY ids against PICKS_DATA kol_ids.
+
+    Returns
+    -------
+    missing_from_picks : set[str]
+        ids that are in the directory but have no pick entry at all.
+    extra_in_picks : set[str]
+        kol_ids used in picks but absent from the directory (orphaned entries).
+
+    Side-effects
+    ------------
+    When *warn* is True:
+    - Prints a warning to stderr for each gap so the issue is visible in the
+      terminal log even when Streamlit is not running.
+    - If Streamlit is active, also emits an ``st.warning`` in the sidebar so
+      operators see it immediately without tailing logs.
+    """
+    import sys
+    import warnings
+
+    if directory is None:
+        directory = ANALYST_DIRECTORY
+    if picks is None:
+        picks = PICKS_DATA
+
+    dir_ids: set[str]   = {a["id"] for a in directory}
+    pick_ids: set[str]  = {p["kol_id"] for p in picks}
+
+    missing_from_picks: set[str] = dir_ids - pick_ids
+    extra_in_picks: set[str]     = pick_ids - dir_ids
+
+    if not warn:
+        return missing_from_picks, extra_in_picks
+
+    if missing_from_picks or extra_in_picks:
+        lines: list[str] = [
+            "⚠️  [kol_whitelist] ANALYST_DIRECTORY 與 PICKS_DATA 不一致：",
+        ]
+        if missing_from_picks:
+            lines.append(
+                f"   • {len(missing_from_picks)} 位分析師在目錄中但缺少推薦記錄："
+                f" {sorted(missing_from_picks)}"
+            )
+        if extra_in_picks:
+            lines.append(
+                f"   • {len(extra_in_picks)} 個 kol_id 在推薦資料中但不在目錄："
+                f" {sorted(extra_in_picks)}"
+            )
+        msg = "\n".join(lines)
+
+        # Always emit to stderr so CI and terminal logs capture it.
+        print(msg, file=sys.stderr)
+        warnings.warn(msg, stacklevel=2)
+
+        # Best-effort Streamlit sidebar warning (no-op if Streamlit not running).
+        try:
+            import streamlit as _st
+            _st.sidebar.warning(msg)
+        except Exception:
+            pass
+    else:
+        # Positive confirmation for CI stdout.
+        print(
+            f"✅  [kol_whitelist] 目錄與推薦一致：{len(dir_ids)} 位分析師均有推薦記錄。",
+            file=sys.stderr,
+        )
+
+    return missing_from_picks, extra_in_picks
+
+
+# Run the check automatically on every module import so mismatches are never
+# silent.  Failures are warnings, not exceptions, so the app keeps running.
+_PICKS_COVERAGE_MISSING, _PICKS_COVERAGE_EXTRA = validate_picks_coverage()
+
+
 def _recency_weight(date_str: str) -> float:
     """時效性加權：7天內=1.0，14天=0.6，30天=0.3，更舊=0.1"""
     try:
