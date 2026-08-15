@@ -9,6 +9,7 @@ import plotly.express as px
 import streamlit as st
 import yfinance as yf
 
+from analysis import classify_sentiment
 from data_fetcher import beijing_timestamp
 from navigation import navigate_to_ticker
 
@@ -35,7 +36,7 @@ GLOBAL_MARKETS: dict[str, dict[str, Any]] = {
         ],
     },
     "歐洲 (Europe)": {
-        "etf": "FEZ",
+        "etf": "VGK",
         "description": "聚焦歐元區大型企業，涵蓋半導體設備、生技醫療與消費品牌。",
         "top_etfs": ["FEZ（SPDR Euro STOXX 50 ETF）", "VGK（Vanguard FTSE Europe）"],
         "adr_stocks": [
@@ -70,6 +71,18 @@ GLOBAL_MARKETS: dict[str, dict[str, Any]] = {
         "adr_stocks": [
             {"ticker": "AAGIY", "name": "友邦保險 (AIA)", "desc": "泛亞區大型壽險集團。"},
             {"ticker": "HKXCY", "name": "港交所 (HKEX)", "desc": "香港證券交易所營運商。"},
+        ],
+    },
+    "全球 (Global)": {
+        "etf": "ACWI",
+        "description": "以全球股票市場為核心，透過單一 ETF 分散已開發與新興市場風險。",
+        "top_etfs": ["ACWI（iShares MSCI ACWI ETF）", "VT（Vanguard Total World Stock ETF）"],
+        "adr_stocks": [
+            {"ticker": "TSM", "name": "台積電 (TSMC)", "desc": "全球先進製程與 AI 晶片代工核心。"},
+            {"ticker": "SONY", "name": "索尼 (Sony)", "desc": "遊戲、娛樂與影像感測器業務多元。"},
+            {"ticker": "TM", "name": "豐田汽車 (Toyota)", "desc": "全球汽車製造與混合動力車龍頭。"},
+            {"ticker": "ASML", "name": "阿斯麥 (ASML)", "desc": "全球 EUV 半導體設備供應商。"},
+            {"ticker": "NVO", "name": "諾和諾德 (Novo Nordisk)", "desc": "代謝疾病治療藥物龍頭。"},
         ],
     },
 }
@@ -141,6 +154,85 @@ def fetch_global_performance() -> tuple[pd.DataFrame, float, str]:
     return pd.DataFrame(rows), round(float(month["SPY"]), 2), beijing_timestamp()
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_market_history(ticker: str, period: str = "5y") -> pd.DataFrame:
+    """Fetch one selected region ETF's historical Close series."""
+    downloaded = yf.download(
+        tickers=[ticker],
+        period=period,
+        auto_adjust=False,
+        progress=False,
+        threads=False,
+        group_by="column",
+    )
+    prices = _close_frame(downloaded, [ticker])
+    if ticker not in prices.columns or prices[ticker].dropna().empty:
+        raise RuntimeError(f"{ticker} 沒有可用的歷史價格資料。")
+    history = prices[[ticker]].rename(columns={ticker: "收盤價"}).dropna()
+    history.index = pd.to_datetime(history.index)
+    history.index.name = "日期"
+    return history.reset_index()
+
+
+def _news_field(item: dict[str, Any], field: str) -> Any:
+    """Read both legacy and current yfinance news response shapes."""
+    content = item.get("content") if isinstance(item.get("content"), dict) else {}
+    return item.get(field) or content.get(field)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_market_news(
+    tickers: tuple[str, ...],
+) -> tuple[pd.DataFrame, float]:
+    """Fetch Yahoo Finance headlines and calculate a keyword sentiment score."""
+    rows: list[dict[str, Any]] = []
+    for ticker in tickers:
+        try:
+            for item in (yf.Ticker(ticker).news or [])[:8]:
+                title = str(_news_field(item, "title") or "").strip()
+                if not title:
+                    continue
+                sentiment = classify_sentiment(title)
+                score = {"positive": 100.0, "neutral": 50.0, "negative": 0.0}[
+                    sentiment
+                ]
+                publisher = _news_field(item, "publisher") or _news_field(
+                    item, "provider"
+                )
+                published = _news_field(item, "pubDate") or _news_field(
+                    item, "providerPublishTime"
+                )
+                if isinstance(published, (int, float)):
+                    published = pd.to_datetime(published, unit="s", errors="coerce")
+                else:
+                    published = pd.to_datetime(published, errors="coerce")
+                rows.append(
+                    {
+                        "Ticker": ticker,
+                        "標題": title,
+                        "發布者": str(publisher or "Yahoo Finance"),
+                        "發布時間": published,
+                        "情緒": {"positive": "正面", "neutral": "中性", "negative": "負面"}[
+                            sentiment
+                        ],
+                        "情緒分數": score,
+                        "連結": _news_field(item, "canonicalUrl")
+                        or _news_field(item, "link"),
+                    }
+                )
+        except Exception:
+            # One unavailable ticker should not hide headlines from the rest.
+            continue
+
+    news_df = pd.DataFrame(rows)
+    if news_df.empty:
+        return news_df, 50.0
+    news_df = news_df.sort_values("發布時間", ascending=False, na_position="last")
+    return news_df.head(30).reset_index(drop=True), round(
+        float(news_df["情緒分數"].mean()), 1
+    )
+
+
 def _diagnosis_button(ticker: str, key: str) -> None:
     if st.button("個股診斷", key=key, use_container_width=True):
         navigate_to_ticker(ticker)
@@ -159,8 +251,8 @@ def _render_adr_list(stocks: list[dict[str, str]], key_prefix: str) -> None:
 def render_global_markets_page() -> None:
     st.title("🌐 全球市場與美股 ADR 精選標的")
     st.caption(
-        "追蹤台灣、日本、歐洲、中國、韓國與香港六大市場 ETF，"
-        "並從美股上市的 ADR／跨境企業白名單挑選研究起點。價格資料每小時更新。"
+        "追蹤台灣、日本、歐洲、全球與其他主要市場 ETF 的歷史走勢，"
+        "並從美股上市的 ADR／跨境企業白名單搭配新聞情緒尋找研究起點。資料每小時更新。"
     )
 
     try:
@@ -209,7 +301,7 @@ def render_global_markets_page() -> None:
     st.caption(f"SPY 同期報酬：{spy_month:+.2f}%（美股基準）")
 
     st.markdown("---")
-    st.subheader("🔍 區域市場探索與 ADR")
+    st.subheader("🔍 國家／區域探索、歷史走勢與 ADR")
     selected_region = st.selectbox(
         "選擇要探索的國家／地區",
         list(GLOBAL_MARKETS),
@@ -217,6 +309,80 @@ def render_global_markets_page() -> None:
     )
     region = GLOBAL_MARKETS[selected_region]
     st.info(f"**市場簡介：** {region['description']}")
+    try:
+        history_df = fetch_market_history(region["etf"])
+        history_fig = px.line(
+            history_df,
+            x="日期",
+            y="收盤價",
+            title=f"{selected_region}｜{region['etf']} 五年歷史走勢",
+            labels={"收盤價": "收盤價（USD）", "日期": ""},
+        )
+        history_fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="#0D1117",
+            plot_bgcolor="#0D1117",
+            height=360,
+            margin=dict(l=0, r=10, t=55, b=20),
+        )
+        st.plotly_chart(history_fig, use_container_width=True)
+    except Exception as exc:
+        st.warning(f"{region['etf']} 歷史走勢暫時無法載入：{exc}")
+
+    news_tickers = tuple(
+        dict.fromkeys([region["etf"]] + [item["ticker"] for item in region["adr_stocks"]])
+    )
+    news_df, sentiment_score = fetch_market_news(news_tickers)
+    sentiment_label = (
+        "偏正面" if sentiment_score >= 60 else "偏負面" if sentiment_score <= 40 else "中性"
+    )
+    sentiment_color = (
+        "#3FB950" if sentiment_score >= 60 else "#FF7B72" if sentiment_score <= 40 else "#D29922"
+    )
+    sentiment_col, news_count_col = st.columns(2)
+    with sentiment_col:
+        st.metric(
+            "📰 新聞情緒評分",
+            f"{sentiment_score:.1f}/100",
+            delta=sentiment_label,
+            delta_color="normal" if sentiment_score >= 50 else "inverse",
+        )
+    with news_count_col:
+        st.metric("熱點新聞數量", f"{len(news_df)} 則")
+    st.markdown(
+        f"<div style='border-left:4px solid {sentiment_color}; padding:8px 12px; "
+        f"background:#1C2128; color:#E6EDF3;'>"
+        f"情緒評分由選定區域 ETF 與 ADR 的 Yahoo Finance 新聞標題計算，"
+        f"正面／中性／負面分別映射為 100／50／0。</div>",
+        unsafe_allow_html=True,
+    )
+    if news_df.empty:
+        st.info("目前沒有可用的 Yahoo Finance 熱點新聞。")
+    else:
+        st.markdown("### 📰 熱點新聞列表")
+        for _, news in news_df.head(10).iterrows():
+            sentiment_icon = {"正面": "🟢", "中性": "🟡", "負面": "🔴"}.get(
+                news["情緒"], "⚪"
+            )
+            published = (
+                news["發布時間"].strftime("%Y-%m-%d %H:%M")
+                if pd.notna(news["發布時間"])
+                else "時間未知"
+            )
+            link = news.get("連結")
+            title = (
+                f"[{news['標題']}]({link})"
+                if isinstance(link, str) and link.startswith("http")
+                else news["標題"]
+            )
+            st.markdown(
+                f"{sentiment_icon} **`{news['Ticker']}`** {title}  \n"
+                f"<span style='color:#8B949E;font-size:12px;'>"
+                f"{news['發布者']} · {published} · {news['情緒']} {news['情緒分數']:.0f}/100"
+                f"</span>",
+                unsafe_allow_html=True,
+            )
+
     etf_col, stocks_col = st.columns([1, 2])
     with etf_col:
         st.markdown("### 🧺 國家／區域 ETF")
