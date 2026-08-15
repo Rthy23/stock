@@ -47,7 +47,7 @@ WATCHLIST_FILE = os.path.join(_DATA_DIR, "watchlist.json")
 PORTFOLIO_FILE = os.path.join(_DATA_DIR, "portfolio.json")
 
 ALERT_LOSS_THRESHOLD = -0.10
-USD_TO_HKD_DEFAULT   =  7.85
+_HKD_RATE_FALLBACK   =  7.85  # used only when live fetch fails
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -90,29 +90,118 @@ SECTOR_ETFS: dict = {
     "Semiconductor":           ("SMH",  "半導體 ETF"),
 }
 
-MACRO_EVENTS = [
-    ("2025-09-18", "Fed 降息 50bp（超市場預期）",       "high"),
-    ("2025-11-05", "美國總統大選結果",                   "high"),
-    ("2025-11-07", "Fed 再降息 25bp",                   "medium"),
-    ("2025-12-18", "Fed 暗示 2026 年降息放緩",           "high"),
-    ("2026-01-20", "特朗普就任美國總統",                  "high"),
-    ("2026-02-12", "美國 1 月 CPI 超預期（通脹回升）",    "high"),
-    ("2026-02-19", "關稅戰升級：對加/墨徵稅 25%",         "high"),
-    ("2026-03-04", "關稅擴大：對中國進口徵稅 20%",         "high"),
-    ("2026-03-07", "美國非農就業報告低於預期",             "medium"),
+# ── Currency helpers ───────────────────────────────────────────────────────────
+@st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_hkd_rate() -> float | None:
+    """Fetch live USD/HKD exchange rate from Yahoo Finance (cached 24 h)."""
+    try:
+        rate = yf.Ticker("HKD=X").fast_info.last_price
+        if rate and 7.0 < float(rate) < 9.0:   # sanity-check realistic range
+            return float(rate)
+    except Exception:
+        pass
+    return None
+
+
+def get_usd_to_hkd() -> tuple[float, bool]:
+    """Return (rate, is_live).
+
+    Tries Yahoo Finance first; falls back to _HKD_RATE_FALLBACK (7.85) when
+    the network call fails, so callers can surface an 「估算匯率」 label.
+    """
+    live = _fetch_hkd_rate()
+    if live is not None:
+        return live, True
+    return _HKD_RATE_FALLBACK, False
+
+
+def _get_rate() -> float:
+    """Return current USD→HKD rate (session-overridable via st.session_state)."""
+    if "usd_to_hkd" in st.session_state:
+        return float(st.session_state["usd_to_hkd"])
+    rate, _ = get_usd_to_hkd()
+    return rate
+
+
+# ── Financial calendar (earnings from Yahoo Finance) ──────────────────────────
+_EARNINGS_UNIVERSE = [
+    ("JPM",  "摩根大通財報 (JPM)",   "🟡", "金融業財報季開始，設定市場基調"),
+    ("TSLA", "特斯拉財報 (TSLA)",    "🟡", "電動車龍頭業績影響成長股情緒"),
+    ("META", "Meta 財報 (META)",     "🟡", "AI 廣告支出與用戶增長指引"),
+    ("AAPL", "蘋果財報 (AAPL)",      "🟡", "服務收入與 iPhone 出貨指引"),
+    ("AMZN", "Amazon 財報 (AMZN)",   "🟡", "AWS 雲端增長與電商邊際利潤"),
+    ("NVDA", "NVIDIA 財報 (NVDA)",   "🔴", "AI 晶片需求指引，半導體板塊風向標"),
+    ("MSFT", "微軟財報 (MSFT)",      "🟡", "雲端與 AI 業務增長指引"),
+    ("GOOGL","Alphabet 財報 (GOOGL)","🟡", "搜索廣告與 GCP 雲端增長"),
+    ("AVGO", "博通財報 (AVGO)",      "🟡", "AI 網路晶片與定製 ASIC 需求"),
+    ("BRK-B","巴菲特/波克夏 (BRK-B)","🟢", "多元化控股業績作為大盤溫度計"),
 ]
 
 
-# ── Currency helpers ───────────────────────────────────────────────────────────
-def _get_rate() -> float:
-    """Return current USD→HKD rate (session-overridable via st.session_state)."""
-    return float(st.session_state.get("usd_to_hkd", USD_TO_HKD_DEFAULT))
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_macro_events() -> tuple[list[dict], bool]:
+    """Fetch upcoming earnings dates for key tickers via Yahoo Finance.
+
+    Returns (events, is_live).
+    - is_live=True  → at least some data came from Yahoo Finance.
+    - is_live=False → Yahoo Finance unavailable; UI should note this.
+
+    Each event dict: {"date": "YYYY-MM-DD", "event": str, "imp": str, "impact": str}
+
+    Note: Yahoo Finance does not expose FOMC / CPI / NFP schedules.
+    For structured macro calendars, integrate FRED or Econoday.
+    """
+    today = datetime.today().date()
+    events: list[dict] = []
+
+    for ticker, label, imp, impact in _EARNINGS_UNIVERSE:
+        try:
+            cal = yf.Ticker(ticker).calendar
+            if not isinstance(cal, dict):
+                continue
+            raw_date = cal.get("Earnings Date")
+            if raw_date is None:
+                continue
+            # calendar may return a list of possible dates (range)
+            if isinstance(raw_date, (list, tuple)) and raw_date:
+                raw_date = raw_date[0]
+            # normalise to date object
+            if hasattr(raw_date, "date"):
+                raw_date = raw_date.date()
+            elif isinstance(raw_date, str):
+                raw_date = datetime.strptime(raw_date[:10], "%Y-%m-%d").date()
+            if not isinstance(raw_date, type(today)):
+                continue
+            if raw_date >= today:
+                events.append({
+                    "date":   raw_date.strftime("%Y-%m-%d"),
+                    "event":  label,
+                    "imp":    imp,
+                    "impact": impact,
+                })
+        except Exception:
+            continue
+
+    events.sort(key=lambda e: e["date"])
+    return events, len(events) > 0
 
 
 def fmt_usd_hkd(amount: float, decimals: int = 0) -> str:
-    rate    = _get_rate()
-    fmt_str = f",.{decimals}f"
-    return f"${amount:{fmt_str}} USD (≈ ${amount * rate:{fmt_str}} HKD)"
+    """Format a USD amount with its HKD equivalent.
+
+    Appends「估算」when the HKD rate comes from the static fallback (7.85)
+    rather than a live Yahoo Finance fetch, so callers always know the
+    provenance of the conversion.
+    """
+    # Honour user session override first; otherwise fetch live rate.
+    if "usd_to_hkd" in st.session_state:
+        rate     = float(st.session_state["usd_to_hkd"])
+        is_live  = True          # user-supplied → treat as intentional
+    else:
+        rate, is_live = get_usd_to_hkd()
+    fmt_str  = f",.{decimals}f"
+    suffix   = "" if is_live else "（估算匯率）"
+    return f"${amount:{fmt_str}} USD (≈ ${amount * rate:{fmt_str}} HKD){suffix}"
 
 
 # ── Timezone normalisation ─────────────────────────────────────────────────────
@@ -230,7 +319,7 @@ def parse_ibkr_screenshot(image_bytes: bytes, mime_type: str = "image/png") -> t
         "2. 若截圖中可見任何 USD/HKD 匯率數字，將其放入 usd_to_hkd 欄位（數字類型）；"
         "若不可見則設為 null。\n\n"
         "回傳格式：\n"
-        "{ \"holdings\": [...], \"usd_to_hkd\": 7.85 或 null }\n\n"
+        "{ \"holdings\": [...], \"usd_to_hkd\": <當日匯率數字> 或 null }\n\n"
         "規則：股票代碼請使用英文大寫，無法判斷的欄位使用 null。"
     )
 

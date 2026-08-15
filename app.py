@@ -32,6 +32,7 @@ from data_fetcher import (
     get_factor_data, standardize_timezone,
     beijing_timestamp,
     SCREENER_STOCKS, BENCHMARK_LABELS, SECTOR_ETFS,
+    fetch_macro_events,
 )
 from ui_components import (
     init_session, navigate_to_diagnosis,
@@ -802,32 +803,24 @@ def main() -> None:
         # ── Financial Calendar ─────────────────────────────────────────────
         st.markdown("---")
         st.markdown("### 📅 財經月曆")
-        st.caption("重要財報、FOMC 會議、經濟數據發布（🔴高/🟡中/🟢低重要度）")
+        st.caption(
+            "主要成分股即將到來的財報日期（來自 Yahoo Finance，每小時更新）。"
+            "FOMC / CPI / NFP 宏觀行事曆需接入 FRED 或 Econoday 等結構化 API。"
+        )
 
-        _CALENDAR = [
-            {"date": "2026-03-19", "event": "FOMC 利率決議",             "imp": "🔴", "impact": "聯準會宣布利率決定，影響全市場風險偏好"},
-            {"date": "2026-03-28", "event": "美國 PCE 通脹數據",          "imp": "🔴", "impact": "聯準會首選通脹指標，直接影響加息預期"},
-            {"date": "2026-04-02", "event": "美國非農就業 (NFP)",          "imp": "🔴", "impact": "就業數據反映經濟健康，超預期數值驅動美元升值"},
-            {"date": "2026-04-10", "event": "美國 CPI 通脹數據",           "imp": "🔴", "impact": "核心通脹指標，高於預期往往壓制股市"},
-            {"date": "2026-04-15", "event": "摩根大通財報 (JPM)",          "imp": "🟡", "impact": "金融業財報季開始，設定市場基調"},
-            {"date": "2026-04-22", "event": "特斯拉財報 (TSLA)",           "imp": "🟡", "impact": "電動車龍頭業績影響成長股情緒"},
-            {"date": "2026-04-29", "event": "Meta 財報 (META)",            "imp": "🟡", "impact": "AI 廣告支出與用戶增長指引"},
-            {"date": "2026-04-30", "event": "FOMC 利率決議 + 記者會",      "imp": "🔴", "impact": "Powell 記者會措辭影響市場全年走向"},
-            {"date": "2026-05-07", "event": "蘋果財報 (AAPL)",             "imp": "🟡", "impact": "服務收入與 iPhone 出貨指引"},
-            {"date": "2026-05-08", "event": "Amazon 財報 (AMZN)",          "imp": "🟡", "impact": "AWS 雲端增長與電商邊際利潤"},
-            {"date": "2026-05-08", "event": "美國非農就業 (NFP)",          "imp": "🔴", "impact": "就業數據影響降息時機預期"},
-            {"date": "2026-05-21", "event": "NVIDIA 財報 (NVDA)",          "imp": "🔴", "impact": "AI 晶片需求指引，半導體板塊風向標"},
-            {"date": "2026-05-28", "event": "GDP 初值 Q1 2026",            "imp": "🟡", "impact": "確認經濟擴張或衰退路徑"},
-            {"date": "2026-06-11", "event": "FOMC 利率決議 + 點陣圖更新",  "imp": "🔴", "impact": "最新利率路徑預期，全年最重要的 Fed 會議之一"},
-            {"date": "2026-06-12", "event": "美國 CPI 通脹數據",           "imp": "🔴", "impact": "中期通脹走向確認"},
-            {"date": "2026-07-10", "event": "美國 CPI 通脹數據",           "imp": "🟡", "impact": "Q3 開局通脹觀察"},
-            {"date": "2026-07-29", "event": "FOMC 利率決議",               "imp": "🔴", "impact": "Q3 利率決定"},
-            {"date": "2026-09-16", "event": "FOMC 利率決議 + 點陣圖更新",  "imp": "🔴", "impact": "秋季利率路徑更新，影響年底行情"},
-        ]
+        try:
+            with st.spinner("正在讀取財報行事曆…"):
+                _cal_events, _cal_is_live = fetch_macro_events()
+        except Exception as _cal_err:
+            _cal_events, _cal_is_live = [], False
+            st.warning(f"財報行事曆讀取失敗：{_cal_err}")
+
         today = datetime.today().date()
-        upcoming = [e for e in _CALENDAR if datetime.strptime(e["date"], "%Y-%m-%d").date() >= today][:8]
+        upcoming = _cal_events[:8]  # already sorted, already >= today
 
-        if upcoming:
+        if not _cal_is_live:
+            st.info("⚠️ Yahoo Finance 行事曆暫時無法連接，財報日期資料不可用，請稍後重新整理。")
+        elif upcoming:
             _cal_cols = st.columns(2)
             for ci, ev in enumerate(upcoming):
                 ev_date = datetime.strptime(ev["date"], "%Y-%m-%d").date()
@@ -843,6 +836,8 @@ def main() -> None:
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+        else:
+            st.info("目前所有受追蹤公司均無近期財報日期資訊。")
 
         # ── KOL / Analyst Tracker ──────────────────────────────────────────
         st.markdown("---")

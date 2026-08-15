@@ -23,7 +23,8 @@ from data_fetcher import (
     get_combined_sentiment, get_vix_history, get_market_benchmark,
     parse_ibkr_screenshot, fmt_usd_hkd, _get_rate,
     beijing_timestamp,
-    MACRO_EVENTS, BENCHMARK_LABELS, SECTOR_ETFS,
+    BENCHMARK_LABELS, SECTOR_ETFS,
+    fetch_macro_events,
 )
 from navigation import navigate_to_ticker
 
@@ -1057,6 +1058,7 @@ def render_opportunity_banner() -> None:
         print(_err("render_opportunity_banner", e))
 
 
+
 # ── Macro sentiment dashboard ──────────────────────────────────────────────────
 def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
     """
@@ -1185,7 +1187,7 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                     vix_df = pd.DataFrame()
             _vix_loaded_at = beijing_timestamp()
             st.plotly_chart(
-                plot_fear_timeline(vix_df, MACRO_EVENTS),
+                plot_fear_timeline(vix_df, []),  # no historical macro events without calendar API
                 use_container_width=True, key="fear_timeline",
             )
             _render_external_timing("VIX", _vix_loaded_at, beijing_timestamp())
