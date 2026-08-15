@@ -190,6 +190,9 @@ PICKS_DATA: List[Dict] = [
 # ──────────────────────────────────────────────────────────────────────────────
 # 3. 評分引擎
 # ──────────────────────────────────────────────────────────────────────────────
+# Kept as a compatibility export.  The scoring engine rebuilds this mapping
+# from the active whitelist on every call so directory changes are reflected
+# immediately in the Macro page.
 WHITELIST_MAP: Dict[str, Dict] = {k["id"]: k for k in WHITELIST}
 
 def _recency_weight(date_str: str) -> float:
@@ -210,7 +213,10 @@ def _argument_weight(quality: int) -> float:
     return {3: 1.0, 2: 0.5, 1: 0.1}.get(quality, 0.3)
 
 
-def score_picks(picks: List[Dict] | None = None) -> List[Dict]:
+def score_picks(
+    picks: List[Dict] | None = None,
+    whitelist: List[Dict] | None = None,
+) -> List[Dict]:
     """
     多維評分並回傳排行榜。
 
@@ -219,10 +225,12 @@ def score_picks(picks: List[Dict] | None = None) -> List[Dict]:
     """
     if picks is None:
         picks = PICKS_DATA
+    active_whitelist = whitelist if whitelist is not None else WHITELIST
+    active_whitelist_map = {k["id"]: k for k in active_whitelist}
 
     ticker_scores: Dict[str, Dict] = {}
     for p in picks:
-        kol = WHITELIST_MAP.get(p["kol_id"])
+        kol = active_whitelist_map.get(p["kol_id"])
         if not kol:
             continue
 
@@ -249,6 +257,14 @@ def score_picks(picks: List[Dict] | None = None) -> List[Dict]:
 
     ranked = sorted(ticker_scores.values(), key=lambda x: x["total_score"], reverse=True)
     return ranked
+
+
+def build_consensus_table(
+    picks: List[Dict] | None = None,
+    whitelist: List[Dict] | None = None,
+) -> List[Dict]:
+    """Build the Macro whitelist consensus table from the active directory."""
+    return score_picks(picks=picks, whitelist=whitelist)
 
 
 def _stars(score: float, max_score: float) -> Tuple[int, str]:
@@ -406,8 +422,6 @@ def render_kol_section(api_key: str = "") -> None:
         "②推薦包含結構化論點（非標題黨）、③機構或平台背書。"
         "觀點一致性、時效性、論點品質三維加權計分。"
     )
-    render_analyst_directory()
-
     # ── 合併用戶自定義 KOL ──────────────────────────────────────────────────────
     _user_handles = load_kol_whitelist()
     _user_kols: List[Dict] = []
@@ -427,8 +441,17 @@ def render_kol_section(api_key: str = "") -> None:
         })
     _all_kols: List[Dict] = list(WHITELIST) + _user_kols
 
+    with st.expander(
+        f"📋 展開精選分析師白名單目錄（共 {len(WHITELIST)} 位）",
+        expanded=False,
+    ):
+        render_analyst_directory()
+
     # ── 白名單卡片 ──
-    with st.expander(f"📋 查看白名單分析師（共 {len(_all_kols)} 位）", expanded=False):
+    with st.expander(
+        f"查看白名單評分資料（共 {len(_all_kols)} 位）",
+        expanded=False,
+    ):
         for kol in _all_kols:
             star_str = "⭐" * kol["rep"]
             cols = st.columns([3, 1])
@@ -456,15 +479,16 @@ def render_kol_section(api_key: str = "") -> None:
                 )
             st.markdown("---")
 
-    st.markdown("### 📊 AI 共識選股分析")
+    st.markdown("### 📊 白名單共識選股分析")
     st.caption(
         "觀點一致性加權：多位專家同時推薦 → 分數提升 ｜ "
         "論點維度驗證：含財報/護城河/估值論述 → 高權重 ｜ "
-        "時效性加權：7天內=滿分，逾月遞減至 10%"
+        f"時效性加權：7天內=滿分，逾月遞減至 10% ｜ "
+        f"目前依 {len(_all_kols)} 位白名單分析師動態計算"
     )
 
     # ── 評分計算 ──
-    ranked = score_picks()
+    ranked = build_consensus_table(whitelist=_all_kols)
     if not ranked:
         st.warning("暫無可用的分析師觀點資料。")
         return
