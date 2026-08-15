@@ -46,10 +46,10 @@ from ui_components import (
 import backtest_engine as be
 from mpf_assistant import render_mpf_page
 from kol_whitelist import render_kol_section
-from pages.sector_analysis import render_sector_analysis_page
-from pages.portfolio_allocation import render_portfolio_allocation_page
-from pages.global_markets import render_global_markets_page
-from pages.analyst_consensus import render_analyst_consensus_page
+from page_modules.sector_analysis import render_sector_analysis_page
+from page_modules.portfolio_allocation import render_portfolio_allocation_page
+from page_modules.global_markets import render_global_markets_page
+from page_modules.analyst_consensus import render_analyst_consensus_page
 from ocr_module import generate_quant_report
 from notifier import (
     run_all_checks, get_current_prices,
