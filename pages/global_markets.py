@@ -155,6 +155,52 @@ def fetch_global_performance() -> tuple[pd.DataFrame, float, str]:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def fetch_all_etf_comparison(period: str = "1y") -> pd.DataFrame:
+    """Fetch all region ETFs + SPY, normalize each series to 100 at first date.
+
+    Returns a long-format DataFrame: 日期 | 標準化指數 | 市場 | ETF
+    """
+    comparison_tickers = GLOBAL_ETFS + ["SPY"]
+    downloaded = yf.download(
+        tickers=comparison_tickers,
+        period=period,
+        auto_adjust=False,
+        progress=False,
+        threads=False,
+        group_by="column",
+    )
+    prices = _close_frame(downloaded, comparison_tickers)
+    if prices.empty:
+        raise RuntimeError("無法取得 ETF 歷史資料進行比較。")
+    prices = prices.ffill().dropna(how="all")
+
+    etf_to_label: dict[str, str] = {
+        info["etf"]: region for region, info in GLOBAL_MARKETS.items()
+    }
+    etf_to_label["SPY"] = "🇺🇸 SPY（美股基準）"
+
+    rows: list[pd.DataFrame] = []
+    for ticker in comparison_tickers:
+        if ticker not in prices.columns:
+            continue
+        series = prices[ticker].dropna()
+        if series.empty:
+            continue
+        base = float(series.iloc[0])
+        if base == 0:
+            continue
+        norm = (series / base * 100).reset_index()
+        norm.columns = pd.Index(["日期", "標準化指數"])
+        norm["市場"] = etf_to_label.get(ticker, ticker)
+        norm["ETF"] = ticker
+        rows.append(norm)
+
+    if not rows:
+        raise RuntimeError("所有 ETF 資料均不可用。")
+    return pd.concat(rows, ignore_index=True)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_market_history(ticker: str, period: str = "5y") -> pd.DataFrame:
     """Fetch one selected region ETF's historical Close series."""
     downloaded = yf.download(
@@ -300,6 +346,44 @@ def render_global_markets_page() -> None:
     st.plotly_chart(fig, use_container_width=True)
     st.caption(f"SPY 同期報酬：{spy_month:+.2f}%（美股基準）")
 
+    # ── 跨市場標準化走勢比較圖 ─────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("📈 全市場 ETF 標準化走勢比較")
+    st.caption("以各 ETF 在所選時間範圍起始日的收盤價為基準（= 100），直接比較各市場的相對報酬。SPY 虛線為美股基準。")
+    _period_options = {"近 1 年": "1y", "近 3 年": "3y", "近 5 年": "5y"}
+    _comparison_period = st.radio(
+        "比較時間範圍",
+        list(_period_options),
+        horizontal=True,
+        key="global_comparison_period",
+    )
+    try:
+        with st.spinner("正在載入跨市場走勢資料…"):
+            comparison_df = fetch_all_etf_comparison(_period_options[_comparison_period])
+        fig_compare = px.line(
+            comparison_df,
+            x="日期",
+            y="標準化指數",
+            color="市場",
+            title=f"各國市場 ETF 與美股（SPY）標準化走勢（{_comparison_period}，起始 = 100）",
+            labels={"標準化指數": "標準化指數（起始=100）", "日期": "", "市場": "市場"},
+        )
+        # SPY line → dashed, slightly thicker for visibility
+        for trace in fig_compare.data:
+            if "SPY" in str(trace.name):
+                trace.update(line=dict(dash="dash", width=2.5))
+        fig_compare.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="#0D1117",
+            plot_bgcolor="#0D1117",
+            height=500,
+            margin=dict(l=0, r=10, t=60, b=20),
+            legend=dict(orientation="v", x=1.01, y=1),
+        )
+        st.plotly_chart(fig_compare, use_container_width=True)
+    except Exception as exc:
+        st.warning(f"跨市場比較走勢圖暫時無法載入：{exc}")
+
     st.markdown("---")
     st.subheader("🔍 國家／區域探索、歷史走勢與 ADR")
     selected_region = st.selectbox(
@@ -416,7 +500,7 @@ def render_global_markets_page() -> None:
                     st.markdown(f"**{row['Ticker']}** · {row['公司']}")
                     _diagnosis_button(
                         row["Ticker"],
-                        f"global_whitelist_diag_{row['Ticker']}",
+                        f"global_whitelist_diag_{row['市場']}_{row['Ticker']}",
                     )
 
 
