@@ -416,6 +416,20 @@ def _render_curated_consensus() -> None:
     top_rows = all_rows[:15]
     rest_rows = all_rows[15:]
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # ⚠️  SIMULATED DATA WARNING — must remain visible until a real data source
+    #     (e.g. live 13F filings, verified news feed) is wired in.
+    #     Do NOT remove this block; see PICKS_DATA comment in kol_whitelist.py.
+    # ──────────────────────────────────────────────────────────────────────────
+    st.error(
+        "⚠️ **模擬資料警告**：目前顯示的推薦內容為**示範用途的模擬資料**，"
+        "並非上述任何人物或機構真實發表過的言論或投資建議。"
+        "在功能正式串接真實資料源（如 SEC 13F 申報、公開新聞爬蟲）之前，"
+        "**請勿將此處內容作為任何投資決策依據。**",
+        icon=None,
+    )
+    # ──────────────────────────────────────────────────────────────────────────
+
     curated_df = pd.DataFrame(top_rows)
     st.dataframe(curated_df, use_container_width=True, hide_index=True)
 
