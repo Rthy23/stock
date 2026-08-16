@@ -2017,6 +2017,8 @@ def main() -> None:
                 _SNAPSHOT_DATES as _BT_SNAPS,
                 run_factor_backtest, load_cache, clear_cache, cache_info,
                 compute_summary as _bt_compute_summary,
+                resume_info as _bt_resume_info,
+                clear_progress as _bt_clear_progress,
             )
 
             st.markdown("### 🧪 七因子 Composite Score 回測快照（擴大版）")
@@ -2042,47 +2044,111 @@ def main() -> None:
 結論：若高分組報酬持續 > 低分組，代表因子具有**初步方向性**，但不代表可直接用於實盤交易。
                 """)
 
-            # ── 快取狀態列 ────────────────────────────────────────────────
-            _ci = cache_info()
-            if _ci:
-                import datetime as _dt_mod
+            # ── 快取 / 進度狀態列 ─────────────────────────────────────────
+            import datetime as _dt_mod
+            _ci      = cache_info()
+            _ri      = _bt_resume_info()   # 斷點進度（未完成的中途資料）
+
+            # 斷點提示橫幅（優先顯示）
+            if _ri:
                 try:
-                    _saved = _dt_mod.datetime.fromisoformat(_ci["saved_at"])
-                    _age_h = (_dt_mod.datetime.utcnow() - _saved).total_seconds() / 3600
-                    _age_str = f"{_age_h:.1f} 小時前" if _age_h >= 1 else f"{int(_age_h*60)} 分鐘前"
-                    _cache_summary = _ci.get("summary") or {}
-                    _cache_n = (_cache_summary.get("n_total") or "?")
+                    _ri_saved = _dt_mod.datetime.fromisoformat(_ri["saved_at"])
+                    _ri_age_h = (_dt_mod.datetime.utcnow() - _ri_saved).total_seconds() / 3600
+                    _ri_age   = (f"{_ri_age_h:.1f} 小時前"
+                                 if _ri_age_h >= 1
+                                 else f"{int(_ri_age_h * 60)} 分鐘前")
+                except Exception:
+                    _ri_age = "稍早"
+                st.warning(
+                    f"⏸️ **上次回測未完成**（{_ri_age}中斷，已完成 "
+                    f"{_ri['n_done']}/{_ri['n_total']} 檔）。"
+                    f"可點「斷點續傳」從第 **{_ri['n_done']+1}** 檔接續，"
+                    f"或點「全新執行」重頭開始。",
+                    icon=None,
+                )
+
+            # 完整快取提示
+            if _ci and not _ri:
+                try:
+                    _ci_saved = _dt_mod.datetime.fromisoformat(_ci["saved_at"])
+                    _ci_age_h = (_dt_mod.datetime.utcnow() - _ci_saved).total_seconds() / 3600
+                    _ci_age   = (f"{_ci_age_h:.1f} 小時前"
+                                 if _ci_age_h >= 1
+                                 else f"{int(_ci_age_h*60)} 分鐘前")
                     st.caption(
-                        f"💾 快取結果存在（{_age_str}計算，共 {_cache_n} 筆有效資料）。"
+                        f"💾 完整快取存在（{_ci_age}計算）。"
                         f"可直接載入，或重新執行取得最新資料。"
                     )
                 except Exception:
                     pass
 
             # ── 按鈕列 ────────────────────────────────────────────────────
-            _btn_cols = st.columns([3, 1.5, 1])
+            if _ri:
+                # 有斷點：顯示四個按鈕（續傳 / 全新 / 載入快取 / 清除）
+                _btn_cols = st.columns([2.5, 2.5, 1.5, 1])
+            else:
+                _btn_cols = st.columns([3, 1.5, 1, 0.01])   # 最後一欄佔位
+
             with _btn_cols[0]:
-                run_btn = st.button(
-                    f"🚀 執行七因子回測（{len(_BT_STOCKS)} 檔，約 4-6 分鐘）",
-                    type="primary",
-                    use_container_width=True,
-                    key="factor_bt_run",
-                    help="每次執行約需拉取 50 支股票 × 3 年歷史，請耐心等候。",
-                )
+                if _ri:
+                    resume_btn = st.button(
+                        f"⏩ 斷點續傳（從第 {_ri['n_done']+1}/{_ri['n_total']} 檔）",
+                        type="primary",
+                        use_container_width=True,
+                        key="factor_bt_resume",
+                        help=f"跳過已完成的 {_ri['n_done']} 檔，只抓剩餘 {_ri['n_total'] - _ri['n_done']} 檔。",
+                    )
+                else:
+                    resume_btn = False
+                    run_btn = st.button(
+                        f"🚀 執行七因子回測（{len(_BT_STOCKS)} 檔，約 4-6 分鐘）",
+                        type="primary",
+                        use_container_width=True,
+                        key="factor_bt_run",
+                        help="每次執行約需拉取 50 支股票 × 3 年歷史，請耐心等候。",
+                    )
+
             with _btn_cols[1]:
-                load_cache_btn = st.button(
-                    "📂 載入快取結果",
-                    use_container_width=True,
-                    key="factor_bt_load_cache",
-                    disabled=(_ci is None),
-                    help="載入上次計算的結果，無需重新抓取資料。",
-                )
+                if _ri:
+                    run_btn = st.button(
+                        "🔄 全新執行（忽略斷點）",
+                        use_container_width=True,
+                        key="factor_bt_run_fresh",
+                        help="忽略斷點進度，從頭重新計算全部 50 檔。",
+                    )
+                else:
+                    load_cache_btn = st.button(
+                        "📂 載入快取結果",
+                        use_container_width=True,
+                        key="factor_bt_load_cache",
+                        disabled=(_ci is None),
+                        help="載入上次完整計算的結果，無需重新抓取資料。",
+                    )
+
             with _btn_cols[2]:
-                if st.button("🗑️ 清除", key="factor_bt_clear",
-                             use_container_width=True):
-                    st.session_state.pop("factor_bt_result", None)
-                    clear_cache()
-                    st.rerun()
+                if _ri:
+                    load_cache_btn = st.button(
+                        "📂 載入舊快取",
+                        use_container_width=True,
+                        key="factor_bt_load_cache",
+                        disabled=(_ci is None),
+                        help="忽略斷點，直接載入上次完整快取。",
+                    )
+                else:
+                    if st.button("🗑️ 清除", key="factor_bt_clear",
+                                 use_container_width=True):
+                        st.session_state.pop("factor_bt_result", None)
+                        clear_cache()
+                        st.rerun()
+
+            with _btn_cols[3]:
+                if _ri:
+                    if st.button("🗑️ 清除全部", key="factor_bt_clear",
+                                 use_container_width=True,
+                                 help="清除斷點進度 + 所有快取，完全重置。"):
+                        st.session_state.pop("factor_bt_result", None)
+                        clear_cache()   # 已包含 clear_progress()
+                        st.rerun()
 
             # ── 載入快取 ──────────────────────────────────────────────────
             if load_cache_btn:
@@ -2093,18 +2159,29 @@ def main() -> None:
                 else:
                     st.warning("快取已過期或損毀，請重新執行回測。")
 
-            # ── 執行回測 ──────────────────────────────────────────────────
-            if run_btn:
+            # ── 執行 / 續傳回測 ───────────────────────────────────────────
+            _do_run    = run_btn or resume_btn
+            _do_resume = bool(resume_btn)   # True = 斷點續傳，False = 全新
+
+            if _do_run:
                 _prog_bar   = st.progress(0.0)
                 _status_txt = st.empty()
 
                 def _fbt_prog(ticker, idx, total):
-                    _prog_bar.progress((idx + 1) / total)
+                    _prog_bar.progress(min((idx + 1) / total, 1.0))
                     _status_txt.text(f"分析 {ticker}… ({idx+1}/{total})")
 
-                with st.spinner("正在抓取歷史資料並計算 7 個因子分數…"):
+                _spin_msg = (
+                    f"⏩ 從第 {_ri['n_done']+1} 檔接續計算（已跳過 {_ri['n_done']} 檔）…"
+                    if _do_resume and _ri
+                    else "正在抓取歷史資料並計算 7 個因子分數…"
+                )
+                with st.spinner(_spin_msg):
                     try:
-                        _result = run_factor_backtest(progress_cb=_fbt_prog)
+                        _result = run_factor_backtest(
+                            progress_cb=_fbt_prog,
+                            resume=_do_resume,
+                        )
                         st.session_state["factor_bt_result"] = _result
                     except Exception as _fbt_err:
                         st.error(f"回測執行失敗：{_fbt_err}")

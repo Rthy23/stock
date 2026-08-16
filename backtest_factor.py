@@ -82,9 +82,10 @@ assert len(_SNAPSHOT_DATES) == 18
 _FETCH_START = date(2020, 6, 1)
 _FETCH_END   = date(2024, 11, 30)
 
-# 快取路徑
-_CACHE_CSV  = "/tmp/factor_bt_cache.csv"
-_CACHE_META = "/tmp/factor_bt_meta.json"
+# 快取 / 進度路徑
+_CACHE_CSV     = "/tmp/factor_bt_cache.csv"
+_CACHE_META    = "/tmp/factor_bt_meta.json"
+_PROGRESS_FILE = "/tmp/factor_bt_progress.json"
 
 # 子因子名稱對應（用於相關係數表）
 _FACTOR_LABELS: dict[str, str] = {
@@ -301,44 +302,138 @@ def _stats(s: pd.Series) -> dict:
     }
 
 
-# ── CSV 快取 I/O ──────────────────────────────────────────────────────────────
-def save_cache(result: dict) -> None:
-    """將回測結果快取至 /tmp CSV + meta JSON。"""
+# ── 進度檔 I/O（逐檔寫入 + 斷點續傳）────────────────────────────────────────
+def save_progress(completed: list[str], records: list[dict]) -> None:
+    """
+    每完成一檔股票後呼叫：
+      1. 覆寫 /tmp/factor_bt_progress.json（記錄已完成清單）
+      2. 覆寫 /tmp/factor_bt_cache.csv（累積至今的資料列）
+      3. 更新 meta JSON（標記為 incomplete）
+    即使中途被 Streamlit 重新整理，下次可接續未完成的部分。
+    """
     try:
-        df = pd.DataFrame(result.get("records", []))
-        df.to_csv(_CACHE_CSV, index=False, encoding="utf-8")
+        with open(_PROGRESS_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "saved_at":  datetime.utcnow().isoformat(),
+                "completed": completed,
+                "n_total":   len(BACKTEST_STOCKS),
+                "n_done":    len(completed),
+            }, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+    try:
+        if records:
+            pd.DataFrame(records).to_csv(_CACHE_CSV, index=False, encoding="utf-8")
         meta = {
-            "saved_at": datetime.utcnow().isoformat(),
-            "summary":  result.get("summary"),
-            "warnings": result.get("warnings", []),
-            "n_stocks": len(BACKTEST_STOCKS),
+            "saved_at":       datetime.utcnow().isoformat(),
+            "complete":       False,
+            "n_stocks_done":  len(completed),
+            "n_stocks_total": len(BACKTEST_STOCKS),
+        }
+        with open(_CACHE_META, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def load_progress() -> "tuple[list[str], list[dict]]":
+    """
+    讀取斷點資訊。
+    回傳 (已完成 ticker 清單, 已存的 records)。
+    無進度或讀取失敗回傳 ([], [])。
+    """
+    try:
+        if not os.path.exists(_PROGRESS_FILE):
+            return [], []
+        with open(_PROGRESS_FILE, "r", encoding="utf-8") as f:
+            prog = json.load(f)
+        completed = prog.get("completed", [])
+        if not completed:
+            return [], []
+        records: list[dict] = []
+        if os.path.exists(_CACHE_CSV):
+            df = pd.read_csv(_CACHE_CSV)
+            records = df.to_dict("records")
+        return completed, records
+    except Exception:
+        return [], []
+
+
+def resume_info() -> Optional[dict]:
+    """
+    回傳斷點摘要（供 UI 顯示）：
+      {"n_done": int, "n_total": int, "saved_at": str, "completed": [...]}
+    無進度或已全部完成則回傳 None。
+    """
+    try:
+        if not os.path.exists(_PROGRESS_FILE):
+            return None
+        with open(_PROGRESS_FILE, "r", encoding="utf-8") as f:
+            prog = json.load(f)
+        n_done = len(prog.get("completed", []))
+        if n_done == 0:
+            return None
+        return {
+            "n_done":    n_done,
+            "n_total":   prog.get("n_total", len(BACKTEST_STOCKS)),
+            "saved_at":  prog.get("saved_at"),
+            "completed": prog.get("completed", []),
+        }
+    except Exception:
+        return None
+
+
+def clear_progress() -> None:
+    """清除進度檔（完成後或使用者手動重置時呼叫）。"""
+    try:
+        os.remove(_PROGRESS_FILE)
+    except Exception:
+        pass
+
+
+# ── CSV 快取 I/O ──────────────────────────────────────────────────────────────
+def save_cache(records: list[dict], warnings: list[str]) -> None:
+    """
+    將已完成的回測結果寫入完整快取（標記 complete=True）。
+    完成後呼叫 clear_progress() 刪除進度檔。
+    """
+    try:
+        pd.DataFrame(records).to_csv(_CACHE_CSV, index=False, encoding="utf-8")
+        meta = {
+            "saved_at":    datetime.utcnow().isoformat(),
+            "complete":    True,
+            "warnings":    warnings,
+            "n_stocks":    len(BACKTEST_STOCKS),
             "n_snapshots": len(_SNAPSHOT_DATES),
         }
         with open(_CACHE_META, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False)
     except Exception:
-        pass  # 快取失敗不影響主流程
+        pass
+    clear_progress()
 
 
 def load_cache(max_age_hours: float = 12.0) -> Optional[dict]:
     """
-    嘗試讀取快取。
-    若快取存在且不超過 max_age_hours，回傳 result dict；否則回傳 None。
+    嘗試讀取**完整**快取（complete=True）。
+    若不存在、已過期、或為未完成的中途快照，回傳 None。
     """
     try:
         if not os.path.exists(_CACHE_CSV) or not os.path.exists(_CACHE_META):
             return None
         with open(_CACHE_META, "r", encoding="utf-8") as f:
             meta = json.load(f)
-        saved_at = datetime.fromisoformat(meta["saved_at"])
+        # 舊版快取沒有 complete 欄位，視為 True（向後相容）
+        if not meta.get("complete", True):
+            return None
+        saved_at  = datetime.fromisoformat(meta["saved_at"])
         age_hours = (datetime.utcnow() - saved_at).total_seconds() / 3600
         if age_hours > max_age_hours:
             return None
-        df = pd.read_csv(_CACHE_CSV)
-        records = df.to_dict("records")
+        records = pd.read_csv(_CACHE_CSV).to_dict("records")
         return {
             "records":    records,
-            "summary":    meta.get("summary"),
             "warnings":   meta.get("warnings", []),
             "cached_at":  meta["saved_at"],
             "from_cache": True,
@@ -348,18 +443,25 @@ def load_cache(max_age_hours: float = 12.0) -> Optional[dict]:
 
 
 def cache_info() -> Optional[dict]:
-    """回傳快取 meta（不載入 records），用於 UI 顯示快取狀態。"""
+    """
+    回傳完整快取的 meta（不載入 records），供 UI 顯示狀態。
+    未完成的中途快照不算，回傳 None。
+    """
     try:
         if not os.path.exists(_CACHE_META):
             return None
         with open(_CACHE_META, "r", encoding="utf-8") as f:
-            return json.load(f)
+            meta = json.load(f)
+        if not meta.get("complete", True):
+            return None
+        return meta
     except Exception:
         return None
 
 
 def clear_cache() -> None:
-    for p in [_CACHE_CSV, _CACHE_META]:
+    """清除完整快取 + 進度檔，全部重置。"""
+    for p in [_CACHE_CSV, _CACHE_META, _PROGRESS_FILE]:
         try:
             os.remove(p)
         except Exception:
@@ -369,23 +471,53 @@ def clear_cache() -> None:
 # ── 主回測函式 ────────────────────────────────────────────────────────────────
 def run_factor_backtest(
     progress_cb: Optional[Callable[[str, int, int], None]] = None,
+    resume: bool = True,
 ) -> dict:
     """
     執行 7-Factor 快速回測（50 檔 × 18 時間點）。
 
+    Parameters
+    ----------
+    progress_cb : callable(ticker, global_idx, total) | None
+        每開始處理一檔股票前呼叫，供 UI 更新進度條。
+    resume : bool
+        True（預設）：若 /tmp/factor_bt_progress.json 存在，
+        自動跳過已完成的 ticker，從中斷處繼續。
+        False：忽略進度檔，從頭重跑所有 50 檔。
+
+    每完成一檔立即呼叫 save_progress()，避免重新整理後遺失進度。
+    全部完成後呼叫 save_cache() 寫入完整快取，並清除進度檔。
+
     回傳 dict：
-      records   : list[dict]  每筆含 ticker / snapshot / composite / signal /
-                               fwd_3m_pct / score_momentum … score_macro
-      summary   : dict        高/觀望/低分組統計 + factor_correlations
-      warnings  : list[str]
+      records     : list[dict]  ticker / snapshot / composite / signal /
+                                fwd_3m_pct / score_momentum … score_macro
+      warnings    : list[str]
+      from_cache  : False
     """
-    records:  list[dict] = []
-    warnings: list[str]  = []
+    warnings: list[str] = []
     total = len(BACKTEST_STOCKS)
 
-    for idx, ticker in enumerate(BACKTEST_STOCKS):
+    # ── 斷點續傳：載入已完成進度 ─────────────────────────────────────────────
+    if resume:
+        completed_tickers, records = load_progress()
+    else:
+        completed_tickers, records = [], []
+
+    _skipped = len(completed_tickers)
+    if _skipped:
+        # 讓使用者在進度條看到「從第 X 檔接續」
         if progress_cb:
-            progress_cb(ticker, idx, total)
+            progress_cb(f"（跳過已完成 {_skipped} 檔，從第 {_skipped+1} 檔繼續）",
+                        _skipped - 1, total)
+
+    remaining = [t for t in BACKTEST_STOCKS if t not in completed_tickers]
+
+    for idx, ticker in enumerate(remaining):
+        global_idx = _skipped + idx
+        if progress_cb:
+            progress_cb(ticker, global_idx, total)
+
+        ticker_records: list[dict] = []
 
         try:
             tk   = yf.Ticker(ticker)
@@ -406,10 +538,15 @@ def run_factor_backtest(
                 )
             except Exception as e:
                 warnings.append(f"{ticker}: 歷史資料抓取失敗 — {e}")
+                # 即使此檔失敗也標記為「已處理」，避免無限重試
+                completed_tickers.append(ticker)
+                save_progress(completed_tickers, records)
                 continue
 
             if hist_full is None or hist_full.empty:
                 warnings.append(f"{ticker}: 歷史資料為空，略過")
+                completed_tickers.append(ticker)
+                save_progress(completed_tickers, records)
                 continue
 
             hist_full.index = pd.to_datetime(hist_full.index).tz_localize(None)
@@ -423,7 +560,6 @@ def run_factor_backtest(
                 if len(hist_slice) < 30:
                     continue  # 歷史不足，靜默跳過
 
-                # 計算 composite + 7 個子因子分數
                 try:
                     factors   = calculate_seven_factors(
                         {"price": fd.get("price", 0)},
@@ -441,7 +577,6 @@ def run_factor_backtest(
                     warnings.append(f"{ticker}@{snap_date}: 因子計算失敗 — {e}")
                     continue
 
-                # 後 3 個月實際報酬
                 fwd_slice = hist_full[
                     (hist_full.index > snap_ts) & (hist_full.index <= fwd_ts)
                 ]
@@ -462,53 +597,30 @@ def run_factor_backtest(
                     "fwd_3m_pct": fwd_return,
                 }
                 record.update(sub_scores)
-                records.append(record)
+                ticker_records.append(record)
 
             time.sleep(0.25)  # 禮貌性限速
 
         except Exception as e:
             warnings.append(f"{ticker}: 未預期錯誤 — {e}")
 
-    # ── 彙整統計 ─────────────────────────────────────────────────────────────
+        # ── 每完成一檔立即寫入進度（無論成功失敗）────────────────────────────
+        records.extend(ticker_records)
+        completed_tickers.append(ticker)
+        save_progress(completed_tickers, records)
+
+    # ── 全部完成：寫入正式完整快取，清除進度檔 ───────────────────────────────
     if not records:
-        return {"records": [], "summary": None, "warnings": warnings}
+        clear_progress()
+        return {"records": [], "warnings": warnings, "from_cache": False}
 
-    df = pd.DataFrame(records)
+    save_cache(records, warnings)   # 同時呼叫 clear_progress()
 
-    high_ret = df[df["composite"] >  1.0]["fwd_3m_pct"]
-    low_ret  = df[df["composite"] < -1.0]["fwd_3m_pct"]
-    mid_ret  = df[(df["composite"] >= -1.0) & (df["composite"] <= 1.0)]["fwd_3m_pct"]
-
-    high_stats = _stats(high_ret)
-    low_stats  = _stats(low_ret)
-    mid_stats  = _stats(mid_ret)
-
-    spread = None
-    if high_stats["mean"] is not None and low_stats["mean"] is not None:
-        spread = round(high_stats["mean"] - low_stats["mean"], 2)
-
-    factor_corrs = compute_factor_correlations(records)
-
-    summary = {
-        "n_total":           len(df),
-        "n_stocks":          len(BACKTEST_STOCKS),
-        "n_snapshots":       len(_SNAPSHOT_DATES),
-        "high":              high_stats,
-        "low":               low_stats,
-        "hold":              mid_stats,
-        "spread":            spread,
-        "direction_ok":      spread is not None and spread > 0,
-        "factor_corrs":      factor_corrs,
-    }
-
-    result = {
-        "records":    df.to_dict("records"),
-        "summary":    summary,
+    return {
+        "records":    records,
         "warnings":   warnings,
         "from_cache": False,
     }
-    save_cache(result)
-    return result
 
 
 if __name__ == "__main__":
