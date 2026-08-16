@@ -2006,7 +2006,217 @@ def main() -> None:
             )
             st.session_state["bt_from_screener"] = False
 
-        (tab0,) = st.tabs(["🔍 股票篩選"])
+        tab0, tab_factor = st.tabs(["🔍 股票篩選", "🧪 七因子回測快照"])
+
+        # ──────────────────────────────────────────────────────────────────
+        # Tab — 七因子 Composite Score 快速回測
+        # ──────────────────────────────────────────────────────────────────
+        with tab_factor:
+            st.markdown("### 🧪 七因子 Composite Score 回測快照（健檢版）")
+            st.caption(
+                "20 檔龍頭股 · 近 2 年 · 每季取樣 · 高分組 vs 低分組 後 3 個月報酬比較"
+            )
+
+            # ── 警語區塊 ──────────────────────────────────────────────────
+            with st.expander("⚠️ 重要限制與警語（必讀）", expanded=False):
+                st.markdown("""
+**本回測為初步方向健檢，非嚴謹量化研究，請勿作為投資依據。**
+
+| 限制項目 | 說明 |
+|---|---|
+| **前瞻偏差（Look-ahead bias）** | 基本面數據（PE、ROE 等）使用**現在**的 yfinance .info，而非當時的真實歷史值，導致評分偏向現在而非過去 |
+| **樣本量極小** | 20 檔股票 × 8 季度 ≈ 160 筆，有效筆數更少；統計顯著性薄弱，只能看大方向 |
+| **選股偏差** | 僅選用當前市值龍頭，存在倖存者偏差（已下市的弱勢股未納入） |
+| **無交易成本** | 未考慮手續費、滑點、稅務等現實因素 |
+| **歷史不代表未來** | 過去規律可能因市場環境變化而失效 |
+
+結論：若高分組報酬持續 > 低分組，代表因子具有**初步方向性**，但不代表可直接用於實盤交易。
+                """)
+
+            # ── 執行按鈕 ──────────────────────────────────────────────────
+            col_run, col_clear = st.columns([3, 1])
+            with col_run:
+                run_btn = st.button(
+                    "🚀 執行七因子回測（約需 2-3 分鐘）",
+                    type="primary",
+                    use_container_width=True,
+                    key="factor_bt_run",
+                    help="每次執行約需拉取 20 支股票的歷史資料，請耐心等候。",
+                )
+            with col_clear:
+                if st.button("🗑️ 清除結果", key="factor_bt_clear"):
+                    st.session_state.pop("factor_bt_result", None)
+                    st.rerun()
+
+            # ── 執行回測 ──────────────────────────────────────────────────
+            if run_btn:
+                from backtest_factor import run_factor_backtest, BACKTEST_STOCKS
+                prog_bar   = st.progress(0.0)
+                status_txt = st.empty()
+
+                def _prog(ticker, idx, total):
+                    prog_bar.progress((idx + 1) / total)
+                    status_txt.text(f"分析 {ticker}… ({idx+1}/{total})")
+
+                with st.spinner("正在抓取歷史資料並計算 Composite Score…"):
+                    try:
+                        result = run_factor_backtest(progress_cb=_prog)
+                        st.session_state["factor_bt_result"] = result
+                    except Exception as _fbt_err:
+                        st.error(f"回測執行失敗：{_fbt_err}")
+                        result = None
+
+                prog_bar.empty()
+                status_txt.empty()
+                if result:
+                    st.rerun()
+
+            # ── 顯示結果 ──────────────────────────────────────────────────
+            result = st.session_state.get("factor_bt_result")
+            if result:
+                summary = result.get("summary")
+                records = result.get("records", [])
+                warns   = result.get("warnings", [])
+
+                if not summary or summary.get("n_total", 0) == 0:
+                    st.warning("回測未能產生有效資料，請確認網路連線後重試。")
+                else:
+                    # ── 核心結論 ──────────────────────────────────────────
+                    h = summary["high"]
+                    l = summary["low"]
+                    m = summary["hold"]
+                    spread = summary.get("spread")
+
+                    direction_icon = "✅" if summary.get("direction_ok") else "❌"
+                    direction_text = "符合預期（高分 > 低分）" if summary.get("direction_ok") else "不符合預期（高分 ≤ 低分）"
+
+                    st.markdown(
+                        f"""
+<div style='background:#1C2128; border:1px solid #30363D; border-radius:10px;
+     padding:16px 20px; margin-bottom:14px;'>
+<div style='font-size:15px; font-weight:700; color:#E6EDF3; margin-bottom:10px;'>
+  📊 回測快照（20 檔股票 · 近 2 年 · 每季取樣）
+</div>
+<table style='width:100%; border-collapse:collapse; font-size:13px;'>
+  <thead>
+    <tr style='border-bottom:1px solid #30363D; color:#8B949E;'>
+      <th style='text-align:left; padding:5px 8px;'>分組</th>
+      <th style='text-align:center; padding:5px 8px;'>樣本數</th>
+      <th style='text-align:center; padding:5px 8px;'>平均 3M 報酬</th>
+      <th style='text-align:center; padding:5px 8px;'>中位數 3M 報酬</th>
+      <th style='text-align:center; padding:5px 8px;'>勝率（正報酬）</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style='border-bottom:1px solid #21262D;'>
+      <td style='padding:6px 8px; color:#3FB950; font-weight:600;'>🟢 高分組（score > 1.0）</td>
+      <td style='text-align:center; padding:6px 8px;'>{h['n']}</td>
+      <td style='text-align:center; padding:6px 8px; color:{"#3FB950" if (h["mean"] or 0) >= 0 else "#FF7B72"}; font-weight:700;'>
+        {f"{h['mean']:+.2f}%" if h["mean"] is not None else "N/A"}</td>
+      <td style='text-align:center; padding:6px 8px;'>
+        {f"{h['median']:+.2f}%" if h["median"] is not None else "N/A"}</td>
+      <td style='text-align:center; padding:6px 8px;'>
+        {f"{h['win_rate']:.1f}%" if h["win_rate"] is not None else "N/A"}</td>
+    </tr>
+    <tr style='border-bottom:1px solid #21262D;'>
+      <td style='padding:6px 8px; color:#8B949E;'>⚪ 觀望組（-1 ≤ score ≤ 1）</td>
+      <td style='text-align:center; padding:6px 8px;'>{m['n']}</td>
+      <td style='text-align:center; padding:6px 8px; color:{"#3FB950" if (m["mean"] or 0) >= 0 else "#FF7B72"}'>
+        {f"{m['mean']:+.2f}%" if m["mean"] is not None else "N/A"}</td>
+      <td style='text-align:center; padding:6px 8px;'>
+        {f"{m['median']:+.2f}%" if m["median"] is not None else "N/A"}</td>
+      <td style='text-align:center; padding:6px 8px;'>
+        {f"{m['win_rate']:.1f}%" if m["win_rate"] is not None else "N/A"}</td>
+    </tr>
+    <tr>
+      <td style='padding:6px 8px; color:#FF7B72; font-weight:600;'>🔴 低分組（score < -1.0）</td>
+      <td style='text-align:center; padding:6px 8px;'>{l['n']}</td>
+      <td style='text-align:center; padding:6px 8px; color:{"#3FB950" if (l["mean"] or 0) >= 0 else "#FF7B72"}; font-weight:700;'>
+        {f"{l['mean']:+.2f}%" if l["mean"] is not None else "N/A"}</td>
+      <td style='text-align:center; padding:6px 8px;'>
+        {f"{l['median']:+.2f}%" if l["median"] is not None else "N/A"}</td>
+      <td style='text-align:center; padding:6px 8px;'>
+        {f"{l['win_rate']:.1f}%" if l["win_rate"] is not None else "N/A"}</td>
+    </tr>
+  </tbody>
+</table>
+<div style='margin-top:12px; padding-top:10px; border-top:1px solid #30363D; font-size:13px;'>
+  <span style='color:#8B949E;'>高低分組報酬差距：</span>
+  <span style='font-weight:700; font-size:15px; color:{"#3FB950" if (spread or 0) > 0 else "#FF7B72"};'>
+    {f"{spread:+.2f}%" if spread is not None else "N/A"}
+  </span>
+  &nbsp;&nbsp;
+  <span style='color:#8B949E;'>方向：</span>
+  <span style='color:#E6EDF3;'>{direction_icon} {direction_text}</span>
+</div>
+</div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    # ── 可信度評估 ────────────────────────────────────────
+                    st.markdown("#### 📋 結果解讀")
+                    total_n = summary["n_total"]
+                    if spread is not None:
+                        if abs(spread) < 2:
+                            credibility = "差距極小（< 2%），幾乎無訊號意義"
+                            cred_color  = "#8B949E"
+                        elif abs(spread) < 5:
+                            credibility = "差距適中（2-5%），有初步方向性，但需更大樣本驗證"
+                            cred_color  = "#E3B341"
+                        else:
+                            credibility = "差距顯著（> 5%），方向性較強，但仍受前瞻偏差影響"
+                            cred_color  = "#3FB950"
+                    else:
+                        credibility = "分組樣本不足，無法計算差距"
+                        cred_color  = "#FF7B72"
+
+                    st.markdown(
+                        f"<div style='background:#161B22; border-left:3px solid {cred_color}; "
+                        f"padding:10px 14px; border-radius:4px; font-size:13px; margin-bottom:10px;'>"
+                        f"<b>可信度評估：</b>{credibility}<br>"
+                        f"<span style='color:#8B949E;'>有效資料點：{total_n} 筆（高分 {h['n']} / 觀望 {m['n']} / 低分 {l['n']}）。"
+                        f"樣本量偏小，結論僅供初步方向參考，不構成任何投資建議。</span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    # ── 明細資料表 ────────────────────────────────────────
+                    with st.expander("📂 查看全部 160 筆明細資料", expanded=False):
+                        if records:
+                            df_display = pd.DataFrame(records).rename(columns={
+                                "ticker":     "股票代碼",
+                                "snapshot":   "快照日期",
+                                "composite":  "Composite Score",
+                                "signal":     "訊號",
+                                "fwd_3m_pct": "後 3 個月報酬 (%)",
+                            })
+                            df_display["後 3 個月報酬 (%)"] = df_display["後 3 個月報酬 (%)"].map(
+                                lambda x: f"{x:+.2f}%"
+                            )
+                            st.dataframe(
+                                df_display,
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+                        else:
+                            st.info("無明細資料")
+
+                    # ── 執行警告 ──────────────────────────────────────────
+                    if warns:
+                        with st.expander(f"⚠️ 執行警告（{len(warns)} 筆）", expanded=False):
+                            for w in warns:
+                                st.caption(w)
+
+            elif not run_btn:
+                # 尚未執行時的說明
+                from backtest_factor import BACKTEST_STOCKS as _BT_STOCKS
+                st.info(
+                    f"點擊上方「🚀 執行七因子回測」開始計算。\n\n"
+                    f"**回測範圍**：{', '.join(_BT_STOCKS)}\n\n"
+                    f"**時間範圍**：2022-Q4 ～ 2024-Q3（8 個季度快照）\n\n"
+                    f"**預計耗時**：2-3 分鐘（需向 yfinance 拉取 {len(_BT_STOCKS)} 支股票的歷史）"
+                )
 
         # ──────────────────────────────────────────────────────────────────
         # Tab 0 — Stock Screener (migrated from Macro page)
