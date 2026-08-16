@@ -2012,96 +2012,151 @@ def main() -> None:
         # Tab — 七因子 Composite Score 快速回測
         # ──────────────────────────────────────────────────────────────────
         with tab_factor:
-            st.markdown("### 🧪 七因子 Composite Score 回測快照（健檢版）")
+            from backtest_factor import (
+                BACKTEST_STOCKS as _BT_STOCKS,
+                _SNAPSHOT_DATES as _BT_SNAPS,
+                run_factor_backtest, load_cache, clear_cache, cache_info,
+            )
+
+            st.markdown("### 🧪 七因子 Composite Score 回測快照（擴大版）")
             st.caption(
-                "20 檔龍頭股 · 近 2 年 · 每季取樣 · 高分組 vs 低分組 後 3 個月報酬比較"
+                f"{len(_BT_STOCKS)} 檔龍頭股 · 近 3 年 · 每兩個月取樣（{len(_BT_SNAPS)} 個時間點）"
+                f" · 高 / 觀望 / 低分組後 3 個月報酬比較 + 子因子相關係數"
             )
 
             # ── 警語區塊 ──────────────────────────────────────────────────
             with st.expander("⚠️ 重要限制與警語（必讀）", expanded=False):
-                st.markdown("""
+                st.markdown(f"""
 **本回測為初步方向健檢，非嚴謹量化研究，請勿作為投資依據。**
 
 | 限制項目 | 說明 |
 |---|---|
-| **前瞻偏差（Look-ahead bias）** | 基本面數據（PE、ROE 等）使用**現在**的 yfinance .info，而非當時的真實歷史值，導致評分偏向現在而非過去 |
-| **樣本量極小** | 20 檔股票 × 8 季度 ≈ 160 筆，有效筆數更少；統計顯著性薄弱，只能看大方向 |
-| **選股偏差** | 僅選用當前市值龍頭，存在倖存者偏差（已下市的弱勢股未納入） |
+| **前瞻偏差（Look-ahead bias）** | 基本面數據（PE、ROE 等）使用**現在**的 yfinance .info，而非當時的真實歷史值 |
+| **樣本量** | {len(_BT_STOCKS)} 檔 × {len(_BT_SNAPS)} 時間點 ≈ 900 筆（實際有效筆數視資料完整度而定）；對平均數比較已有基本統計意義，但非嚴謹學術回測 |
+| **倖存者偏差** | 僅含當前市值龍頭股，已下市弱勢股未納入 |
 | **無交易成本** | 未考慮手續費、滑點、稅務等現實因素 |
+| **子因子相關係數** | 僅為初步線性關係參考，不代表因果關係，且未考慮產業 / 市場環境差異 |
 | **歷史不代表未來** | 過去規律可能因市場環境變化而失效 |
 
 結論：若高分組報酬持續 > 低分組，代表因子具有**初步方向性**，但不代表可直接用於實盤交易。
                 """)
 
-            # ── 執行按鈕 ──────────────────────────────────────────────────
-            col_run, col_clear = st.columns([3, 1])
-            with col_run:
+            # ── 快取狀態列 ────────────────────────────────────────────────
+            _ci = cache_info()
+            if _ci:
+                import datetime as _dt_mod
+                try:
+                    _saved = _dt_mod.datetime.fromisoformat(_ci["saved_at"])
+                    _age_h = (_dt_mod.datetime.utcnow() - _saved).total_seconds() / 3600
+                    _age_str = f"{_age_h:.1f} 小時前" if _age_h >= 1 else f"{int(_age_h*60)} 分鐘前"
+                    _cache_summary = _ci.get("summary") or {}
+                    _cache_n = (_cache_summary.get("n_total") or "?")
+                    st.caption(
+                        f"💾 快取結果存在（{_age_str}計算，共 {_cache_n} 筆有效資料）。"
+                        f"可直接載入，或重新執行取得最新資料。"
+                    )
+                except Exception:
+                    pass
+
+            # ── 按鈕列 ────────────────────────────────────────────────────
+            _btn_cols = st.columns([3, 1.5, 1])
+            with _btn_cols[0]:
                 run_btn = st.button(
-                    "🚀 執行七因子回測（約需 2-3 分鐘）",
+                    f"🚀 執行七因子回測（{len(_BT_STOCKS)} 檔，約 4-6 分鐘）",
                     type="primary",
                     use_container_width=True,
                     key="factor_bt_run",
-                    help="每次執行約需拉取 20 支股票的歷史資料，請耐心等候。",
+                    help="每次執行約需拉取 50 支股票 × 3 年歷史，請耐心等候。",
                 )
-            with col_clear:
-                if st.button("🗑️ 清除結果", key="factor_bt_clear"):
+            with _btn_cols[1]:
+                load_cache_btn = st.button(
+                    "📂 載入快取結果",
+                    use_container_width=True,
+                    key="factor_bt_load_cache",
+                    disabled=(_ci is None),
+                    help="載入上次計算的結果，無需重新抓取資料。",
+                )
+            with _btn_cols[2]:
+                if st.button("🗑️ 清除", key="factor_bt_clear",
+                             use_container_width=True):
                     st.session_state.pop("factor_bt_result", None)
+                    clear_cache()
                     st.rerun()
+
+            # ── 載入快取 ──────────────────────────────────────────────────
+            if load_cache_btn:
+                _cached = load_cache(max_age_hours=72)
+                if _cached:
+                    st.session_state["factor_bt_result"] = _cached
+                    st.rerun()
+                else:
+                    st.warning("快取已過期或損毀，請重新執行回測。")
 
             # ── 執行回測 ──────────────────────────────────────────────────
             if run_btn:
-                from backtest_factor import run_factor_backtest, BACKTEST_STOCKS
-                prog_bar   = st.progress(0.0)
-                status_txt = st.empty()
+                _prog_bar   = st.progress(0.0)
+                _status_txt = st.empty()
 
-                def _prog(ticker, idx, total):
-                    prog_bar.progress((idx + 1) / total)
-                    status_txt.text(f"分析 {ticker}… ({idx+1}/{total})")
+                def _fbt_prog(ticker, idx, total):
+                    _prog_bar.progress((idx + 1) / total)
+                    _status_txt.text(f"分析 {ticker}… ({idx+1}/{total})")
 
-                with st.spinner("正在抓取歷史資料並計算 Composite Score…"):
+                with st.spinner("正在抓取歷史資料並計算 7 個因子分數…"):
                     try:
-                        result = run_factor_backtest(progress_cb=_prog)
-                        st.session_state["factor_bt_result"] = result
+                        _result = run_factor_backtest(progress_cb=_fbt_prog)
+                        st.session_state["factor_bt_result"] = _result
                     except Exception as _fbt_err:
                         st.error(f"回測執行失敗：{_fbt_err}")
-                        result = None
+                        _result = None
 
-                prog_bar.empty()
-                status_txt.empty()
-                if result:
+                _prog_bar.empty()
+                _status_txt.empty()
+                if _result:
                     st.rerun()
 
             # ── 顯示結果 ──────────────────────────────────────────────────
             result = st.session_state.get("factor_bt_result")
             if result:
-                summary = result.get("summary")
+                summary = result.get("summary") or {}
                 records = result.get("records", [])
                 warns   = result.get("warnings", [])
+                is_cached = result.get("from_cache", False)
+
+                if is_cached:
+                    st.caption("📂 顯示的是快取結果（非本次即時計算）")
 
                 if not summary or summary.get("n_total", 0) == 0:
                     st.warning("回測未能產生有效資料，請確認網路連線後重試。")
                 else:
-                    # ── 核心結論 ──────────────────────────────────────────
-                    h = summary["high"]
-                    l = summary["low"]
-                    m = summary["hold"]
+                    h      = summary["high"]
+                    l      = summary["low"]
+                    m      = summary["hold"]
                     spread = summary.get("spread")
+                    n_tot  = summary["n_total"]
+                    n_stocks   = summary.get("n_stocks", len(_BT_STOCKS))
+                    n_snaps    = summary.get("n_snapshots", len(_BT_SNAPS))
 
                     direction_icon = "✅" if summary.get("direction_ok") else "❌"
                     direction_text = "符合預期（高分 > 低分）" if summary.get("direction_ok") else "不符合預期（高分 ≤ 低分）"
+
+                    def _low_n_note(n):
+                        return " ⚠️ 樣本偏少" if n < 30 else ""
+
+                    def _ret_color(v):
+                        return "#3FB950" if (v or 0) >= 0 else "#FF7B72"
 
                     st.markdown(
                         f"""
 <div style='background:#1C2128; border:1px solid #30363D; border-radius:10px;
      padding:16px 20px; margin-bottom:14px;'>
 <div style='font-size:15px; font-weight:700; color:#E6EDF3; margin-bottom:10px;'>
-  📊 回測快照（20 檔股票 · 近 2 年 · 每季取樣）
+  📊 回測快照（{n_stocks} 檔股票 · 近 3 年 · {n_snaps} 個時間點 · 共 {n_tot} 筆有效資料）
 </div>
 <table style='width:100%; border-collapse:collapse; font-size:13px;'>
   <thead>
     <tr style='border-bottom:1px solid #30363D; color:#8B949E;'>
       <th style='text-align:left; padding:5px 8px;'>分組</th>
-      <th style='text-align:center; padding:5px 8px;'>樣本數</th>
+      <th style='text-align:center; padding:5px 8px;'>樣本數 n</th>
       <th style='text-align:center; padding:5px 8px;'>平均 3M 報酬</th>
       <th style='text-align:center; padding:5px 8px;'>中位數 3M 報酬</th>
       <th style='text-align:center; padding:5px 8px;'>勝率（正報酬）</th>
@@ -2109,9 +2164,9 @@ def main() -> None:
   </thead>
   <tbody>
     <tr style='border-bottom:1px solid #21262D;'>
-      <td style='padding:6px 8px; color:#3FB950; font-weight:600;'>🟢 高分組（score > 1.0）</td>
-      <td style='text-align:center; padding:6px 8px;'>{h['n']}</td>
-      <td style='text-align:center; padding:6px 8px; color:{"#3FB950" if (h["mean"] or 0) >= 0 else "#FF7B72"}; font-weight:700;'>
+      <td style='padding:6px 8px; color:#3FB950; font-weight:600;'>🟢 高分組（composite > 1.0）</td>
+      <td style='text-align:center; padding:6px 8px;'>{h['n']}{_low_n_note(h['n'])}</td>
+      <td style='text-align:center; padding:6px 8px; color:{_ret_color(h["mean"])}; font-weight:700;'>
         {f"{h['mean']:+.2f}%" if h["mean"] is not None else "N/A"}</td>
       <td style='text-align:center; padding:6px 8px;'>
         {f"{h['median']:+.2f}%" if h["median"] is not None else "N/A"}</td>
@@ -2119,9 +2174,9 @@ def main() -> None:
         {f"{h['win_rate']:.1f}%" if h["win_rate"] is not None else "N/A"}</td>
     </tr>
     <tr style='border-bottom:1px solid #21262D;'>
-      <td style='padding:6px 8px; color:#8B949E;'>⚪ 觀望組（-1 ≤ score ≤ 1）</td>
-      <td style='text-align:center; padding:6px 8px;'>{m['n']}</td>
-      <td style='text-align:center; padding:6px 8px; color:{"#3FB950" if (m["mean"] or 0) >= 0 else "#FF7B72"}'>
+      <td style='padding:6px 8px; color:#8B949E;'>⚪ 觀望組（-1 ≤ composite ≤ 1）</td>
+      <td style='text-align:center; padding:6px 8px;'>{m['n']}{_low_n_note(m['n'])}</td>
+      <td style='text-align:center; padding:6px 8px; color:{_ret_color(m["mean"])}'>
         {f"{m['mean']:+.2f}%" if m["mean"] is not None else "N/A"}</td>
       <td style='text-align:center; padding:6px 8px;'>
         {f"{m['median']:+.2f}%" if m["median"] is not None else "N/A"}</td>
@@ -2129,9 +2184,9 @@ def main() -> None:
         {f"{m['win_rate']:.1f}%" if m["win_rate"] is not None else "N/A"}</td>
     </tr>
     <tr>
-      <td style='padding:6px 8px; color:#FF7B72; font-weight:600;'>🔴 低分組（score < -1.0）</td>
-      <td style='text-align:center; padding:6px 8px;'>{l['n']}</td>
-      <td style='text-align:center; padding:6px 8px; color:{"#3FB950" if (l["mean"] or 0) >= 0 else "#FF7B72"}; font-weight:700;'>
+      <td style='padding:6px 8px; color:#FF7B72; font-weight:600;'>🔴 低分組（composite < -1.0）</td>
+      <td style='text-align:center; padding:6px 8px;'>{l['n']}{_low_n_note(l['n'])}</td>
+      <td style='text-align:center; padding:6px 8px; color:{_ret_color(l["mean"])}; font-weight:700;'>
         {f"{l['mean']:+.2f}%" if l["mean"] is not None else "N/A"}</td>
       <td style='text-align:center; padding:6px 8px;'>
         {f"{l['median']:+.2f}%" if l["median"] is not None else "N/A"}</td>
@@ -2141,13 +2196,16 @@ def main() -> None:
   </tbody>
 </table>
 <div style='margin-top:12px; padding-top:10px; border-top:1px solid #30363D; font-size:13px;'>
-  <span style='color:#8B949E;'>高低分組報酬差距：</span>
+  <span style='color:#8B949E;'>高低分組報酬差距（spread）：</span>
   <span style='font-weight:700; font-size:15px; color:{"#3FB950" if (spread or 0) > 0 else "#FF7B72"};'>
     {f"{spread:+.2f}%" if spread is not None else "N/A"}
   </span>
   &nbsp;&nbsp;
   <span style='color:#8B949E;'>方向：</span>
   <span style='color:#E6EDF3;'>{direction_icon} {direction_text}</span>
+</div>
+<div style='margin-top:6px; font-size:11px; color:#8B949E;'>
+  ⚠️ 欄位標有「樣本偏少」者樣本 n &lt; 30，統計可靠性低，結果僅供參考。
 </div>
 </div>
                         """,
@@ -2156,13 +2214,12 @@ def main() -> None:
 
                     # ── 可信度評估 ────────────────────────────────────────
                     st.markdown("#### 📋 結果解讀")
-                    total_n = summary["n_total"]
                     if spread is not None:
                         if abs(spread) < 2:
                             credibility = "差距極小（< 2%），幾乎無訊號意義"
                             cred_color  = "#8B949E"
                         elif abs(spread) < 5:
-                            credibility = "差距適中（2-5%），有初步方向性，但需更大樣本驗證"
+                            credibility = "差距適中（2–5%），有初步方向性，但需更大樣本驗證"
                             cred_color  = "#E3B341"
                         else:
                             credibility = "差距顯著（> 5%），方向性較強，但仍受前瞻偏差影響"
@@ -2173,31 +2230,103 @@ def main() -> None:
 
                     st.markdown(
                         f"<div style='background:#161B22; border-left:3px solid {cred_color}; "
-                        f"padding:10px 14px; border-radius:4px; font-size:13px; margin-bottom:10px;'>"
+                        f"padding:10px 14px; border-radius:4px; font-size:13px; margin-bottom:12px;'>"
                         f"<b>可信度評估：</b>{credibility}<br>"
-                        f"<span style='color:#8B949E;'>有效資料點：{total_n} 筆（高分 {h['n']} / 觀望 {m['n']} / 低分 {l['n']}）。"
-                        f"樣本量偏小，結論僅供初步方向參考，不構成任何投資建議。</span>"
+                        f"<span style='color:#8B949E;'>有效資料點：{n_tot} 筆"
+                        f"（高分 {h['n']} / 觀望 {m['n']} / 低分 {l['n']}）。"
+                        f"相關係數僅為初步線性關係參考，不代表因果關係，"
+                        f"且未考慮產業 / 市場環境差異。結論不構成任何投資建議。</span>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
 
+                    # ── 子因子相關係數排序表 ──────────────────────────────
+                    factor_corrs = summary.get("factor_corrs", [])
+                    if factor_corrs:
+                        st.markdown("#### 🔬 7 個子因子與後 3 個月報酬的 Pearson 相關係數")
+                        st.caption(
+                            "正值 → 該因子分數越高、後續報酬傾向越好；"
+                            "負值 → 反向；接近 0 → 線性關聯不明顯。"
+                            "（r 絕對值 < 0.05 視為幾乎無線性關聯）"
+                        )
+
+                        # 組裝 HTML 表格
+                        _corr_rows = ""
+                        for _fc in factor_corrs:
+                            _r = _fc.get("corr")
+                            _n = _fc.get("n", 0)
+                            if _r is None:
+                                _r_str = "N/A"
+                                _r_col = "#8B949E"
+                                _bar   = ""
+                            else:
+                                _r_str = f"{_r:+.4f}"
+                                _r_col = "#3FB950" if _r > 0.03 else ("#FF7B72" if _r < -0.03 else "#8B949E")
+                                _bar_w = min(int(abs(_r) * 120), 120)
+                                _bar_c = "#3FB950" if _r >= 0 else "#FF7B72"
+                                _bar   = (f"<div style='display:inline-block; width:{_bar_w}px; "
+                                          f"height:8px; background:{_bar_c}; border-radius:3px; "
+                                          f"vertical-align:middle; margin-left:6px;'></div>")
+                            _low_note = " ⚠️" if _n < 30 else ""
+                            _corr_rows += (
+                                f"<tr style='border-bottom:1px solid #21262D;'>"
+                                f"<td style='padding:6px 10px;'>{_fc['label']}</td>"
+                                f"<td style='text-align:center; padding:6px 8px; color:{_r_col}; "
+                                f"font-weight:700; font-size:14px;'>{_r_str}</td>"
+                                f"<td style='padding:6px 8px;'>{_bar}</td>"
+                                f"<td style='text-align:center; padding:6px 8px; color:#8B949E; font-size:12px;'>"
+                                f"{_n}{_low_note}</td>"
+                                f"</tr>"
+                            )
+
+                        st.markdown(
+                            f"<div style='background:#1C2128; border:1px solid #30363D; "
+                            f"border-radius:8px; padding:12px 16px; margin-bottom:12px;'>"
+                            f"<table style='width:100%; border-collapse:collapse; font-size:13px;'>"
+                            f"<thead><tr style='border-bottom:1px solid #30363D; color:#8B949E;'>"
+                            f"<th style='text-align:left; padding:5px 10px;'>子因子</th>"
+                            f"<th style='text-align:center; padding:5px 8px;'>相關係數 r</th>"
+                            f"<th style='padding:5px 8px;'>方向強度</th>"
+                            f"<th style='text-align:center; padding:5px 8px;'>有效 n</th>"
+                            f"</tr></thead>"
+                            f"<tbody>{_corr_rows}</tbody>"
+                            f"</table>"
+                            f"<div style='font-size:11px; color:#8B949E; margin-top:8px;'>"
+                            f"排序：相關係數由高至低。⚠️ = 有效樣本 &lt; 30，結果不穩定。"
+                            f"</div></div>",
+                            unsafe_allow_html=True,
+                        )
+
                     # ── 明細資料表 ────────────────────────────────────────
-                    with st.expander("📂 查看全部 160 筆明細資料", expanded=False):
+                    with st.expander(f"📂 查看全部 {n_tot} 筆明細資料", expanded=False):
                         if records:
-                            df_display = pd.DataFrame(records).rename(columns={
+                            _score_cols = [c for c in pd.DataFrame(records).columns
+                                           if c.startswith("score_")]
+                            _rename = {
                                 "ticker":     "股票代碼",
                                 "snapshot":   "快照日期",
-                                "composite":  "Composite Score",
+                                "composite":  "Composite",
                                 "signal":     "訊號",
-                                "fwd_3m_pct": "後 3 個月報酬 (%)",
-                            })
-                            df_display["後 3 個月報酬 (%)"] = df_display["後 3 個月報酬 (%)"].map(
+                                "fwd_3m_pct": "後3M報酬(%)",
+                            }
+                            _rename.update({c: c.replace("score_", "").capitalize()
+                                            for c in _score_cols})
+                            _df_disp = pd.DataFrame(records).rename(columns=_rename)
+                            _df_disp["後3M報酬(%)"] = _df_disp["後3M報酬(%)"].map(
                                 lambda x: f"{x:+.2f}%"
                             )
-                            st.dataframe(
-                                df_display,
-                                use_container_width=True,
-                                hide_index=True,
+                            st.dataframe(_df_disp, use_container_width=True, hide_index=True)
+
+                            # CSV 下載
+                            _csv_bytes = pd.DataFrame(records).to_csv(
+                                index=False, encoding="utf-8-sig"
+                            ).encode("utf-8-sig")
+                            st.download_button(
+                                "⬇️ 匯出 CSV",
+                                data=_csv_bytes,
+                                file_name="factor_backtest_snapshot.csv",
+                                mime="text/csv",
+                                key="factor_bt_download",
                             )
                         else:
                             st.info("無明細資料")
@@ -2209,13 +2338,11 @@ def main() -> None:
                                 st.caption(w)
 
             elif not run_btn:
-                # 尚未執行時的說明
-                from backtest_factor import BACKTEST_STOCKS as _BT_STOCKS
                 st.info(
-                    f"點擊上方「🚀 執行七因子回測」開始計算。\n\n"
-                    f"**回測範圍**：{', '.join(_BT_STOCKS)}\n\n"
-                    f"**時間範圍**：2022-Q4 ～ 2024-Q3（8 個季度快照）\n\n"
-                    f"**預計耗時**：2-3 分鐘（需向 yfinance 拉取 {len(_BT_STOCKS)} 支股票的歷史）"
+                    f"點擊「🚀 執行七因子回測」開始計算，或「📂 載入快取結果」使用上次結果。\n\n"
+                    f"**回測股票（{len(_BT_STOCKS)} 檔）**：{', '.join(_BT_STOCKS)}\n\n"
+                    f"**時間範圍**：2021-Q4 ～ 2024-Q3（{len(_BT_SNAPS)} 個雙月快照）\n\n"
+                    f"**預計耗時**：4–6 分鐘（{len(_BT_STOCKS)} 支股票 × 3 年歷史，每支只拉一次）"
                 )
 
         # ──────────────────────────────────────────────────────────────────
