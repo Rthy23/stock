@@ -196,19 +196,33 @@ def calc_buy_zone(price, sma50, sma200) -> tuple:
         return None, None, "計算錯誤", None
 
 
-def calc_exit_strategy(price, sma200, low20) -> tuple:
+def calc_exit_strategy(price, sma200, low20, risk_reward_ratio: float = 2.0) -> tuple:
     """
-    Stop-loss: max(SMA200×0.97, low20×0.98).
-    Take-profit: 1:2 R:R from entry.
-    risk_pct = (止損價 - 買入價) / 買入價 × 100  (negative, representing loss %).
+    Simplified exit-strategy calculation.
+
+    Stop-loss: min(SMA200×0.97, low20×0.98).
+        Uses the *lower* of the two candidate levels to give the position
+        more breathing room.  Using max() would lock the stop too close to
+        price when SMA200 is already far below the 20-day low.
+
+    Take-profit: entry × (1 − risk × risk_reward_ratio).
+        Default ratio is 2.0 (1:2 R:R), but can be overridden so callers
+        may dynamically adjust based on Beta or ATR.
+
+    ⚠️ Note: this is a simplified, fixed-parameter risk model.
+    It is NOT an ATR-based or volatility-adjusted dynamic stop-loss.
+    Results should be treated as a starting reference, not a precise
+    risk-management signal.
+
     Returns (stop, target, risk_pct).
+    risk_pct is negative (represents % loss from entry to stop).
     """
     try:
         if sma200 is None or low20 is None:
             return None, None, None
-        stop    = max(sma200 * 0.97, low20 * 0.98)
-        risk    = (stop - price) / price          # negative value (loss %)
-        target  = price * (1 - risk * 2)          # price + 2× the upside equivalent
+        stop   = min(sma200 * 0.97, low20 * 0.98)        # more conservative
+        risk   = (stop - price) / price                   # negative value
+        target = price * (1 - risk * risk_reward_ratio)   # parameterised R:R
         return stop, target, risk
     except Exception as e:
         print(_err("calc_exit_strategy", e))

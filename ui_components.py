@@ -34,6 +34,16 @@ def _err(func: str, e: Exception) -> str:
     return (f"MODULE_ERROR: [{_MODULE}] | FUNCTION: [{func}] "
             f"| ERROR: {type(e).__name__}: {e}")
 
+# ── Shared disclaimer (Task 2) ─────────────────────────────────────────────────
+_DISCLAIMER_TEXT = (
+    "⚠️ 本頁面所有評分、訊號與參考價位均為程式化計算結果，僅供研究參考，"
+    "不構成任何投資建議。請自行評估風險並謹慎決策。"
+)
+
+def render_disclaimer() -> None:
+    """Render the standard investment disclaimer as a muted caption."""
+    st.caption(_DISCLAIMER_TEXT)
+
 
 def _render_external_timing(
     label: str, loaded_at: str, analyzed_at: str | None = None
@@ -495,18 +505,19 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
         stop, target, risk_pct = (
             calc_exit_strategy(price, sma200, low20) if sma200 else (None, None, None)
         )
-        st.markdown("### 📊 建議買入區間 (Buy Zone)")
+        render_disclaimer()
+        st.markdown("### 📊 訊號買入區間 (Buy Zone)")
         st.info(zone_label)
         if buy_lower and buy_upper:
             zone_progress_bar(pct, buy_lower, buy_upper, price)
-        st.markdown("### 📋 交易計畫建議")
+        st.markdown("### 📋 交易計畫參考")
         c1, c2, c3 = st.columns(3)
         buy_limit  = buy_upper if buy_upper else price
         with c1:
             st.markdown(f"""
             <div style="background:#0D2E1A; border:1px solid #238636;
                         border-radius:10px; padding:16px; text-align:center;">
-              <div style="font-size:12px; color:#8B949E; margin-bottom:4px;">🟢 建議買入上限</div>
+              <div style="font-size:12px; color:#8B949E; margin-bottom:4px;">🟢 參考買入上限</div>
               <div style="font-size:22px; font-weight:700; color:#3FB950;">${buy_limit:.2f}</div>
               <div style="font-size:13px; color:#8B949E;">(SMA 50)</div>
             </div>""", unsafe_allow_html=True)
@@ -515,9 +526,9 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
                 st.markdown(f"""
                 <div style="background:#2D1B1B; border:1px solid #DA3633;
                             border-radius:10px; padding:16px; text-align:center;">
-                  <div style="font-size:12px; color:#8B949E; margin-bottom:4px;">🔴 建議止損價</div>
+                  <div style="font-size:12px; color:#8B949E; margin-bottom:4px;">🔴 參考止損位</div>
                   <div style="font-size:22px; font-weight:700; color:#FF7B72;">${stop:.2f}</div>
-                  <div style="font-size:13px; color:#8B949E;">(SMA200 × 97% 或 20日低 × 98%)</div>
+                  <div style="font-size:13px; color:#8B949E;">(SMA200 × 97% 與 20日低 × 98% 取低)</div>
                 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown("資料不足")
@@ -526,9 +537,9 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
                 st.markdown(f"""
                 <div style="background:#1B2A3D; border:1px solid #1F6FEB;
                             border-radius:10px; padding:16px; text-align:center;">
-                  <div style="font-size:12px; color:#8B949E; margin-bottom:4px;">🎯 預計目標價</div>
+                  <div style="font-size:12px; color:#8B949E; margin-bottom:4px;">🎯 參考目標價</div>
                   <div style="font-size:22px; font-weight:700; color:#58A6FF;">${target:.2f}</div>
-                  <div style="font-size:13px; color:#8B949E;">(買入點盈虧比 1:2)</div>
+                  <div style="font-size:13px; color:#8B949E;">(參考風報比 1:2，非保證獲利)</div>
                 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown("資料不足")
@@ -536,10 +547,10 @@ def render_trade_plan(stock_info: dict, hist: pd.DataFrame) -> tuple:
             st.markdown("---")
             entry_price = buy_limit
             if price < stop:
-                st.error(
-                    f"🚨 **已觸發止損 / 不建議此買入價**：目前股價 ${price:.2f} 已低於止損線 "
-                    f"${stop:.2f}，技術上已跌破止損位。"
-                    f"**強烈不建議**在此價位買入，請等待趨勢確認後再重新評估。"
+                st.warning(
+                    f"⚠️ **訊號偏向：風險偏高，建議觀望**｜目前股價 ${price:.2f} 已低於參考止損位 "
+                    f"${stop:.2f}，技術上已跌破止損訊號。"
+                    f"請等待趨勢明確後再重新評估，以上為程式化訊號，不構成操作建議。"
                 )
             elif risk_pct is not None:
                 loss_pct = abs(risk_pct) * 100
@@ -788,30 +799,45 @@ def render_portfolio_dashboard() -> None:
 
                 parsed_rows = st.session_state.get("ibkr_parsed_rows", [])
                 if parsed_rows:
-                    st.markdown("#### 📋 AI 解析結果預覽（請核對後再確認同步）")
-                    rate       = _get_rate()
-                    preview_df = pd.DataFrame([{
-                        "代碼":             r.get("ticker", ""),
-                        "持倉量":           r.get("qty"),
-                        "平均成本(USD)":     r.get("avg_price"),
-                        f"平均成本(HKD@{rate})": (
-                            round(float(r["avg_price"]) * rate, 2)
-                            if r.get("avg_price") is not None else None
-                        ),
-                        "未實現盈虧(USD)":  r.get("unrealized_pnl"),
-                        f"未實現盈虧(HKD@{rate})": (
-                            round(float(r["unrealized_pnl"]) * rate, 2)
-                            if r.get("unrealized_pnl") is not None else None
-                        ),
+                    st.markdown("#### 📋 AI 解析結果（可直接編輯後確認儲存）")
+                    st.warning(
+                        "⚠️ 請核對 AI 解析結果是否正確，確認無誤後再儲存。"
+                        "AI 辨識可能出現誤判，錯誤數據將影響風控計算，請謹慎確認。"
+                    )
+                    edit_df = pd.DataFrame([{
+                        "代碼":          r.get("ticker", ""),
+                        "持倉量":        r.get("qty"),
+                        "平均成本(USD)": r.get("avg_price"),
+                        "未實現盈虧(USD)": r.get("unrealized_pnl"),
                     } for r in parsed_rows])
-                    st.dataframe(preview_df, use_container_width=True, hide_index=True)
-                    if st.button("✅ 確認同步到投資組合", type="primary",
+                    edited_df = st.data_editor(
+                        edit_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        num_rows="dynamic",
+                        column_config={
+                            "代碼": st.column_config.TextColumn(
+                                "代碼", help="股票代碼，例如 AAPL", required=True
+                            ),
+                            "持倉量": st.column_config.NumberColumn(
+                                "持倉量", min_value=0, step=1
+                            ),
+                            "平均成本(USD)": st.column_config.NumberColumn(
+                                "平均成本 (USD)", min_value=0, format="$%.2f"
+                            ),
+                            "未實現盈虧(USD)": st.column_config.NumberColumn(
+                                "未實現盈虧 (USD)", format="$%.2f"
+                            ),
+                        },
+                        key="ibkr_data_editor",
+                    )
+                    if st.button("✅ 確認並儲存到投資組合", type="primary",
                                  use_container_width=True, key="ibkr_confirm"):
                         synced = skipped = 0
-                        for r in parsed_rows:
-                            ticker    = str(r.get("ticker") or "").strip().upper()
-                            qty       = r.get("qty")
-                            avg_price = r.get("avg_price")
+                        for _, row in edited_df.iterrows():
+                            ticker    = str(row.get("代碼") or "").strip().upper()
+                            qty       = row.get("持倉量")
+                            avg_price = row.get("平均成本(USD)")
                             if ticker and qty is not None and avg_price is not None:
                                 try:
                                     st.session_state["portfolio"][ticker] = {
@@ -1179,6 +1205,11 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+                if sd.get("total", 0) < 10:
+                    st.caption(
+                        f"⚠️ 社交情緒樣本數過少（{sd.get('total',0)} 則），"
+                        "當前分數僅供參考，數據量不足以反映真實市場情緒。"
+                    )
 
             with st.spinner("載入 VIX 走勢…"):
                 try:

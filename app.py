@@ -42,7 +42,7 @@ from ui_components import (
     render_opportunity_banner, render_macro_sentiment_dashboard,
     plot_price_chart, plot_volume_chart,
     plot_analyst_targets, plot_analyst_recs, plot_radar,
-    zone_progress_bar,
+    zone_progress_bar, render_disclaimer,
 )
 import backtest_engine as be
 from mpf_assistant import render_mpf_page
@@ -1058,7 +1058,8 @@ def main() -> None:
                 f"  <div><span style='color:#aaa; font-size:11px;'>情緒溫度</span><br>"
                 f"    <span style='color:{_s_color}; font-size:14px; font-weight:700;'>"
                 f"    {_combined_q:.0f}/100</span>"
-                f"    <span style='color:{_s_color}; font-size:11px;'> {_s_label}</span></div>"
+                f"    <span style='color:{_s_color}; font-size:11px;'> {_s_label}</span>"
+                f"    <span style='color:#555; font-size:9px;'> ¹</span></div>"
                 f"  <div><span style='color:#aaa; font-size:11px;'>個股 Alpha (vs {_bm_ticker_q})</span><br>"
                 f"    <span style='color:{_a_color}; font-size:14px; font-weight:700;'>"
                 f"    {_a_label}</span>"
@@ -1071,6 +1072,11 @@ def main() -> None:
                 f"    </span></div>"
                 f"</div></div>",
                 unsafe_allow_html=True,
+            )
+
+            st.caption(
+                "¹ 情緒溫度為自訂 VIX 簡化映射指數，非 CNN 官方 Fear & Greed Index。"
+                "VIX 數值透過線性映射轉為 0–100 分，高 VIX → 低分（恐慌），低 VIX → 高分（貪婪）。"
             )
 
             # ── 融合訊號 ───────────────────────────────────────────────────────
@@ -1098,6 +1104,7 @@ def main() -> None:
                 )
 
             st.markdown("---")
+            render_disclaimer()
 
             # Section 1: Diagnosis + Radar
             try:
@@ -1698,13 +1705,15 @@ def main() -> None:
                         "STRONG SELL": "#FF4B4B",
                     }
                     _sc = _sig_colors.get(_signal, "#FFD700")
+                    render_disclaimer()
                     st.markdown(
                         f"<div style='background:#161B22; border:1px solid #30363D; "
                         f"border-radius:12px; padding:20px 28px; margin-bottom:16px;'>"
                         f"<div style='display:flex; justify-content:space-between; align-items:center;'>"
                         f"<div>"
                         f"<div style='font-size:24px; font-weight:700; color:#E6EDF3;'>{ticker}</div>"
-                        f"<div style='color:{_sc}; font-size:18px; font-weight:700; margin-top:4px;'>{_signal}</div>"
+                        f"<div style='color:{_sc}; font-size:18px; font-weight:700; margin-top:4px;'>"
+                        f"訊號偏向：{_signal}</div>"
                         f"<div style='color:#8B949E; font-size:12px; margin-top:2px;'>7-Factor Composite Score</div>"
                         f"</div>"
                         f"<div style='text-align:right;'>"
@@ -1716,6 +1725,14 @@ def main() -> None:
                         f"height:100%; background:{_sc}; border-radius:3px;'></div>"
                         f"</div></div></div></div>",
                         unsafe_allow_html=True,
+                    )
+                    st.caption(
+                        "綜合分數 = Momentum(20%) + Value(15%) + Quality(20%) + Growth(15%)"
+                        " + Volatility(10%) + Sentiment(10%) + Macro(10%)"
+                    )
+                    st.caption(
+                        "⚠️ 以上因子權重為人工設定，尚未經過歷史回測驗證其優劣，"
+                        "僅作研究參考框架，不代表嚴謹的量化模型。"
                     )
                     _fcol1, _fcol2 = st.columns([1, 1])
                     with _fcol1:
@@ -1789,15 +1806,22 @@ def main() -> None:
                             unsafe_allow_html=True,
                         )
 
-                    _r1c1, _r1c2, _r1c3 = st.columns(3)
-                    with _r1c1: _ftbl("Momentum")
-                    with _r1c2: _ftbl("Value")
-                    with _r1c3: _ftbl("Quality")
-                    _r2c1, _r2c2, _r2c3 = st.columns(3)
-                    with _r2c1: _ftbl("Growth")
-                    with _r2c2: _ftbl("Volatility")
-                    with _r2c3: _ftbl("Sentiment")
-                    _ftbl("Macro")
+                    st.markdown("**📋 因子細項明細（點擊展開）**")
+                    _weights = {
+                        "Momentum": "20%", "Value": "15%", "Quality": "20%",
+                        "Growth": "15%", "Volatility": "10%", "Sentiment": "10%", "Macro": "10%",
+                    }
+                    for _fk in ["Momentum", "Value", "Quality", "Growth",
+                                 "Volatility", "Sentiment", "Macro"]:
+                        _fg_e  = _f7.get(_fk, {})
+                        _fs_e  = _fg_e.get("score", 0.0)
+                        _fc_e  = "#00FF7F" if _fs_e >= 0 else "#FF4B4B"
+                        _lbl_e = _fg_e.get("label", _fk)
+                        with st.expander(
+                            f"{_lbl_e}　　"
+                            f"評分 **{_fs_e:+.2f}**　　權重 {_weights.get(_fk, '')}"
+                        ):
+                            _ftbl(_fk)
 
                     st.markdown("---")
                     st.markdown("**🤖 AI 量化因子報告**")

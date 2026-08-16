@@ -1,0 +1,100 @@
+請對以下 stock 儀表板專案進行修改，分成 5 個獨立任務，請逐一完成並在每個任務完成後跑一次現有功能確認沒有壞掉：
+
+═══════════════════════════════════════
+任務 1（優先，可能是 bug）：修正 analysis.py 的止損公式
+═══════════════════════════════════════
+檔案：analysis.py，函式：calc_exit_strategy
+
+目前程式碼：
+    stop = max(sma200 * 0.97, low20 * 0.98)
+
+問題：用 max() 取兩個候選止損價中「較高」的一個，當股價已經跌破
+SMA200 很多但尚未跌破 20 日低點時，止損價會被鎖在離現價很近、
+偏高的 SMA200*0.97，導致在正常回調中容易被提前洗出場。
+
+請改為：
+1. 把 stop 改成取兩者中「較低」的價位（min），讓止損價更保守、
+   給股價合理的波動空間：
+       stop = min(sma200 * 0.97, low20 * 0.98)
+2. 同時把 target 的計算從固定 1:2 風報比，改成可傳入參數的
+   risk_reward_ratio（預設 2.0），方便未來依 Beta 或 ATR 動態調整：
+       def calc_exit_strategy(price, sma200, low20, risk_reward_ratio=2.0):
+           ...
+           target = price * (1 - risk * risk_reward_ratio)
+3. 在函式的 docstring 補充說明目前用的是簡化版風控邏輯，
+   並非真正的 ATR-based 動態停損。
+
+═══════════════════════════════════════
+任務 2：所有「建議」文字加上免責聲明
+═══════════════════════════════════════
+檔案：analysis.py（news_impact_summary、classify_investment_horizon
+等會產出建議文字的函式）、以及對應顯示這些內容的 ui_components.py
+
+請執行：
+1. 在 app.py 或 ui_components.py 建立一個共用的 disclaimer 元件
+   （例如 render_disclaimer() 函式），內容類似：
+   「⚠️ 本頁面所有評分、訊號與建議均為程式化計算結果，
+   僅供參考，不構成投資建議，請自行判斷風險並謹慎決策。」
+2. 在以下位置固定顯示這個免責聲明：
+   - 每個個股診斷頁（Micro 分析）結果區塊上方
+   - 7-Factor 綜合評分（composite score / signal）顯示旁邊
+   - 買入區間 / 止損止盈 卡片旁邊
+3. 把目前語氣強烈的建議字眼，例如「建議加倉」「考慮止損」，
+   改成語氣更中性的說法，例如「訊號偏向：加碼區間」
+   「訊號偏向：風險偏高」，避免像是直接下指令。
+
+═══════════════════════════════════════
+任務 3：讓 7-Factor 評分透明化、可展開查看細項
+═══════════════════════════════════════
+檔案：ui_components.py（顯示 calculate_seven_factors 結果的部分）
+
+目前只顯示最終 composite score 跟 signal（STRONG BUY 等），
+子項目分數（items 陣列裡的 name / value_str / score）雖然
+analysis.py 已經算出來了，但 UI 上要確認有完整攤開顯示。
+
+請執行：
+1. 用 st.expander 為每個因子群組（Momentum / Value / Quality /
+   Growth / Volatility / Sentiment / Macro）建立可展開區塊，
+   列出該群組底下每個子指標的原始數值、格式化字串、對應分數。
+2. 在 composite score 旁邊加一行小字說明權重分配，例如：
+   「綜合分數 = Momentum20% + Value15% + Quality20% + Growth15%
+   + Volatility10% + Sentiment10% + Macro10%」
+3. 加一個 tooltip 或說明頁，講清楚這組權重是人工設定、
+   尚未經過歷史回測驗證優劣，避免使用者誤以為是嚴謹的量化模型。
+
+═══════════════════════════════════════
+任務 4：資料時效性與樣本量標示
+═══════════════════════════════════════
+檔案：data_fetcher.py、ui_components.py
+
+請執行：
+1. 在每個用到 st.cache_data(ttl=900) 抓來的股價/財務數據旁邊，
+   顯示「資料更新於 X 分鐘前」（可用 st.cache_data 的
+   cache 時間或另外記錄 fetch 時間戳）。
+2. 在 get_social_sentiment 回傳的結果中，如果 total（訊息總數）
+   低於某個門檻（例如 10），在 UI 上加註「樣本數過少，
+   情緒分數僅供參考」，而不是直接顯示一個看似精確的分數。
+3. 在恐慌貪婪指數（Fear & Greed Gauge）附近加一行小字：
+   「本指數為自訂 VIX 簡化映射，非 CNN 官方 Fear & Greed Index」，
+   避免使用者誤認為是業界標準指標。
+
+═══════════════════════════════════════
+任務 5：IBKR 截圖解析（Gemini Vision）加入人工確認步驟
+═══════════════════════════════════════
+檔案：data_fetcher.py（parse_ibkr_screenshot）、
+呼叫此函式的頁面（可能在 page_modules 底下的持倉頁）
+
+目前解析完 AI 回傳的 holdings 直接可能被寫入 portfolio。
+請執行：
+1. 在呼叫 parse_ibkr_screenshot 後，不要直接呼叫 save_portfolio，
+   而是先把解析結果顯示成一個可編輯的表格
+   （用 st.data_editor 呈現 ticker / qty / avg_price /
+   unrealized_pnl 這幾欄）。
+2. 加一個「確認並儲存」按鈕，使用者檢查/修改過數字後
+   按下才真正寫入 portfolio.json。
+3. 在表格上方加提示文字：「請核對 AI 解析結果是否正確，
+   確認無誤後再儲存，避免因誤判導致風控計算錯誤。」
+
+═══════════════════════════════════════
+完成後，請提供一份簡短的變更摘要，列出每個任務改了哪些檔案、
+哪些函式，方便我 review。
