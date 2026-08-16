@@ -2019,6 +2019,7 @@ def main() -> None:
                 compute_summary as _bt_compute_summary,
                 resume_info as _bt_resume_info,
                 clear_progress as _bt_clear_progress,
+                run_oos_validation as _bt_oos,
             )
 
             st.markdown("### 🧪 七因子 Composite Score 回測快照（擴大版）")
@@ -2460,6 +2461,192 @@ def main() -> None:
                         with st.expander(f"⚠️ 執行警告（{len(warns)} 筆）", expanded=False):
                             for w in warns:
                                 st.caption(w)
+
+                    # ── 樣本外驗證：訓練期 / 測試期 ───────────────────────
+                    st.markdown("---")
+                    st.markdown("### 🔬 樣本外驗證：原始權重 vs IC 調整權重")
+                    st.caption(
+                        "用時間切分（前 12 個快照 = 訓練期，後 6 個快照 = 測試期）"
+                        "做單次樣本外驗證，確認訓練期觀察到的因子相關性是否在測試期具有穩健性。"
+                        "純統計重算，不呼叫任何 API。"
+                    )
+
+                    _oos = _bt_oos(records)
+
+                    if "error" in _oos:
+                        st.warning(f"無法執行樣本外驗證：{_oos['error']}")
+                    else:
+                        # ── 時間切分資訊 ──────────────────────────────────
+                        with st.expander("📅 訓練期 / 測試期切分方式", expanded=False):
+                            _oos_c1, _oos_c2 = st.columns(2)
+                            with _oos_c1:
+                                st.markdown("**🟦 訓練期（前 12 個快照）**")
+                                for _s in _oos["train_snaps"]:
+                                    st.caption(f"• {_s}")
+                                st.caption(f"共 {_oos['n_train']} 筆資料")
+                            with _oos_c2:
+                                st.markdown("**🟧 測試期（後 6 個快照）**")
+                                for _s in _oos["test_snaps"]:
+                                    st.caption(f"• {_s}")
+                                st.caption(f"共 {_oos['n_test']} 筆資料")
+
+                        # ── IC 調整權重推導過程 ────────────────────────────
+                        with st.expander("⚙️ IC 調整權重推導（訓練期計算）", expanded=False):
+                            st.caption(
+                                "僅用訓練期 12 個快照的資料計算各子因子與未來 3M 報酬的 Pearson 相關係數。"
+                                "負相關因子歸零（避免翻轉），正相關因子按比例重新分配（總和 = 100%）。"
+                            )
+                            _w_rows = ""
+                            for _k in ["Momentum","Value","Quality","Growth",
+                                       "Volatility","Sentiment","Macro"]:
+                                _ic   = _oos["train_corrs"].get(_k)
+                                _orig = _oos["orig_weights"].get(_k, 0)
+                                _ic_w = _oos["ic_weights"].get(_k, 0)
+                                _ic_str  = f"{_ic:+.4f}" if _ic is not None else "N/A"
+                                _ic_col  = "#3FB950" if (_ic or 0) > 0.03 else (
+                                           "#FF7B72" if (_ic or 0) < -0.03 else "#8B949E")
+                                _zeroed  = _k in _oos["zeroed_factors"]
+                                _w_note  = (
+                                    "<span style='color:#FF7B72'>（歸零）</span>"
+                                    if _zeroed else ""
+                                )
+                                _delta   = _ic_w - _orig
+                                _d_col   = "#3FB950" if _delta > 0.005 else (
+                                           "#FF7B72" if _delta < -0.005 else "#8B949E")
+                                _d_str   = f"{_delta:+.1%}" if not _zeroed else "↓歸零"
+                                _w_rows += (
+                                    f"<tr style='border-bottom:1px solid #21262D;'>"
+                                    f"<td style='padding:5px 10px;'>{_k}</td>"
+                                    f"<td style='text-align:center; padding:5px 8px; "
+                                    f"color:{_ic_col}; font-weight:700;'>{_ic_str}</td>"
+                                    f"<td style='text-align:center; padding:5px 8px;'>{_orig:.0%}</td>"
+                                    f"<td style='text-align:center; padding:5px 8px; "
+                                    f"font-weight:700;'>{_ic_w:.0%} {_w_note}</td>"
+                                    f"<td style='text-align:center; padding:5px 8px; "
+                                    f"color:{_d_col};'>{_d_str}</td>"
+                                    f"</tr>"
+                                )
+                            st.markdown(
+                                f"<div style='background:#1C2128; border:1px solid #30363D; "
+                                f"border-radius:8px; padding:12px 16px;'>"
+                                f"<table style='width:100%; border-collapse:collapse; font-size:13px;'>"
+                                f"<thead><tr style='border-bottom:1px solid #30363D; color:#8B949E;'>"
+                                f"<th style='text-align:left; padding:5px 10px;'>因子</th>"
+                                f"<th style='text-align:center;'>訓練期 IC (r)</th>"
+                                f"<th style='text-align:center;'>原始權重</th>"
+                                f"<th style='text-align:center;'>IC 調整權重</th>"
+                                f"<th style='text-align:center;'>變動</th>"
+                                f"</tr></thead>"
+                                f"<tbody>{_w_rows}</tbody>"
+                                f"</table></div>",
+                                unsafe_allow_html=True,
+                            )
+
+                        # ── 測試期比較主表 ────────────────────────────────
+                        st.markdown("#### 📊 測試期分組報酬比較（{} 個快照 · {} 筆）".format(
+                            len(_oos["test_snaps"]), _oos["n_test"]))
+
+                        def _oos_row(label, color, res):
+                            h = res["high"]; l = res["low"]
+                            sp = res["spread"]
+                            ok = res["direction_ok"]
+                            def _fmt(v):
+                                return f"{v:+.2f}%" if v is not None else "N/A"
+                            def _col(v):
+                                return "#3FB950" if (v or 0) >= 0 else "#FF7B72"
+                            return (
+                                f"<tr style='border-bottom:1px solid #21262D;'>"
+                                f"<td style='padding:7px 10px; color:{color}; font-weight:700;'>{label}</td>"
+                                f"<td style='text-align:center; padding:7px 8px; "
+                                f"color:{_col(h['mean'])}; font-weight:700;'>{_fmt(h['mean'])}</td>"
+                                f"<td style='text-align:center; padding:7px 8px;'>{h['n']}</td>"
+                                f"<td style='text-align:center; padding:7px 8px; "
+                                f"color:{_col(l['mean'])}; font-weight:700;'>{_fmt(l['mean'])}</td>"
+                                f"<td style='text-align:center; padding:7px 8px;'>{l['n']}</td>"
+                                f"<td style='text-align:center; padding:7px 8px; font-weight:700; "
+                                f"font-size:15px; color:{_col(sp)};'>{_fmt(sp)}</td>"
+                                f"<td style='text-align:center; padding:7px 8px;'>"
+                                f"{'✅' if ok else '❌'}</td>"
+                                f"</tr>"
+                            )
+
+                        _tbl_rows = (
+                            _oos_row("📐 原始權重", "#8B949E", _oos["orig_result"])
+                            + _oos_row("🎯 IC 調整權重", "#58A6FF", _oos["ic_result"])
+                        )
+                        st.markdown(
+                            f"<div style='background:#1C2128; border:1px solid #30363D; "
+                            f"border-radius:10px; padding:14px 18px; margin-bottom:14px;'>"
+                            f"<table style='width:100%; border-collapse:collapse; font-size:13px;'>"
+                            f"<thead><tr style='border-bottom:1px solid #30363D; color:#8B949E;'>"
+                            f"<th style='text-align:left; padding:5px 10px;'>權重方案</th>"
+                            f"<th style='text-align:center;' colspan='2'>🟢 高分組</th>"
+                            f"<th style='text-align:center;' colspan='2'>🔴 低分組</th>"
+                            f"<th style='text-align:center;'>Spread</th>"
+                            f"<th style='text-align:center;'>方向</th>"
+                            f"</tr>"
+                            f"<tr style='border-bottom:1px solid #30363D; color:#8B949E; font-size:11px;'>"
+                            f"<th></th>"
+                            f"<th style='text-align:center;'>平均報酬</th><th style='text-align:center;'>n</th>"
+                            f"<th style='text-align:center;'>平均報酬</th><th style='text-align:center;'>n</th>"
+                            f"<th></th><th></th>"
+                            f"</tr></thead>"
+                            f"<tbody>{_tbl_rows}</tbody>"
+                            f"</table></div>",
+                            unsafe_allow_html=True,
+                        )
+
+                        # ── 解讀邏輯 ──────────────────────────────────────
+                        _sp_orig = _oos["orig_result"]["spread"] or 0
+                        _sp_ic   = _oos["ic_result"]["spread"]   or 0
+                        _ic_better = _sp_ic > _sp_orig
+
+                        if _ic_better and (_sp_ic - _sp_orig) >= 1.0:
+                            _verdict_title = "IC 調整權重在測試期表現優於原始權重"
+                            _verdict_color = "#3FB950"
+                            _verdict_icon  = "✅"
+                            _verdict_body  = (
+                                f"IC 調整權重的測試期 spread（{_sp_ic:+.2f}%）"
+                                f"明顯優於原始權重（{_sp_orig:+.2f}%），差距 {_sp_ic - _sp_orig:+.2f}%。"
+                                f"訓練期觀察到的相關性在測試期有一定樣本外穩健性，"
+                                f"**調整因子權重方向值得進一步評估**（但非決定性證據，見免責說明）。"
+                            )
+                        elif _ic_better:
+                            _verdict_title = "IC 調整權重略優，但差距有限"
+                            _verdict_color = "#E3B341"
+                            _verdict_icon  = "⚠️"
+                            _verdict_body  = (
+                                f"IC 調整權重的測試期 spread（{_sp_ic:+.2f}%）"
+                                f"略優於原始權重（{_sp_orig:+.2f}%），差距僅 {_sp_ic - _sp_orig:+.2f}%。"
+                                f"差距在小樣本範圍內不顯著，**建議維持現狀**，觀察更多時間點後再決定。"
+                            )
+                        else:
+                            _verdict_title = "IC 調整權重在測試期表現未優於原始權重"
+                            _verdict_color = "#FF7B72"
+                            _verdict_icon  = "❌"
+                            _verdict_body  = (
+                                f"IC 調整權重的測試期 spread（{_sp_ic:+.2f}%）"
+                                f"未優於原始權重（{_sp_orig:+.2f}%）。"
+                                f"訓練期觀察到的負相關可能是特定期間雜訊，"
+                                f"**建議維持 analysis.py 現有權重**，不需要調整。"
+                            )
+
+                        st.markdown(
+                            f"<div style='background:#161B22; border-left:4px solid {_verdict_color}; "
+                            f"padding:12px 16px; border-radius:4px; margin-bottom:10px;'>"
+                            f"<div style='font-size:14px; font-weight:700; color:#E6EDF3; "
+                            f"margin-bottom:6px;'>{_verdict_icon} {_verdict_title}</div>"
+                            f"<div style='font-size:13px; color:#C9D1D9;'>{_verdict_body}</div>"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                        st.caption(
+                            "⚠️ **免責說明**：這是單次時間切分的初步驗證。"
+                            f"測試期僅 {len(_oos['test_snaps'])} 個時間點、約 {_oos['n_test']} 筆資料，"
+                            "屬小樣本，統計結論屬初步方向參考，不是決定性證據。"
+                            "無論結果如何，均不建議直接依此調整實盤策略。"
+                        )
 
             elif not run_btn:
                 st.info(

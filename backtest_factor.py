@@ -623,6 +623,141 @@ def run_factor_backtest(
     }
 
 
+# ── 樣本外驗證：訓練期 / 測試期時間切分 ──────────────────────────────────────
+def run_oos_validation(records: list[dict]) -> dict:
+    """
+    訓練期 / 測試期樣本外驗證（純 CPU，不呼叫 API）。
+
+    切分規則
+    --------
+    - 訓練期：最早 12 個快照時間點（約前 2/3）
+    - 測試期：最晚 6 個快照時間點（約後 1/3）
+    - 嚴格按時間先後切分，保留時序意義
+
+    步驟
+    ----
+    1. 訓練期計算各子因子與 fwd_3m_pct 的 Pearson 相關係數（IC）
+    2. 負 IC 因子歸零；正 IC 因子按比例重新分配（總和 = 1）
+    3. 測試期用「原始權重」與「IC 調整權重」各重算 composite
+    4. 對兩組 composite 做百分位分組（P25/P75），比較 spread
+
+    回傳 dict
+    ---------
+    train_snaps, test_snaps, n_train, n_test,
+    train_corrs, orig_weights, ic_weights, zeroed_factors,
+    orig_result, ic_result
+    """
+    if not records:
+        return {"error": "無資料"}
+
+    df = pd.DataFrame(records)
+    if "snapshot" not in df.columns or "fwd_3m_pct" not in df.columns:
+        return {"error": "資料缺少必要欄位"}
+
+    ORIG_WEIGHTS: dict[str, float] = {
+        "Momentum":   0.20, "Value":      0.15, "Quality":    0.20,
+        "Growth":     0.15, "Volatility": 0.10,
+        "Sentiment":  0.10, "Macro":      0.10,
+    }
+    FACTOR_KEYS = list(ORIG_WEIGHTS.keys())
+
+    all_snaps = sorted(df["snapshot"].unique())
+    if len(all_snaps) < 8:
+        return {"error": f"快照時間點僅 {len(all_snaps)} 個（需至少 8 個才能切分）"}
+
+    train_snaps = all_snaps[:12]
+    test_snaps  = all_snaps[12:]
+
+    train_df = df[df["snapshot"].isin(train_snaps)].copy()
+    test_df  = df[df["snapshot"].isin(test_snaps)].copy()
+
+    if len(test_df) < 10:
+        return {"error": "測試期資料不足 10 筆，無法計算統計量"}
+
+    # ── 步驟 1：訓練期 IC ────────────────────────────────────────────────
+    train_corrs: dict[str, Optional[float]] = {}
+    for k in FACTOR_KEYS:
+        col = f"score_{k.lower()}"
+        if col not in train_df.columns:
+            train_corrs[k] = None
+            continue
+        sub = train_df[[col, "fwd_3m_pct"]].dropna()
+        train_corrs[k] = (
+            round(float(sub[col].corr(sub["fwd_3m_pct"])), 4)
+            if len(sub) >= 10 else None
+        )
+
+    # ── 步驟 2：IC 調整權重 ──────────────────────────────────────────────
+    pos_ic = {k: v for k, v in train_corrs.items()
+              if v is not None and v > 0}
+    total_pos = sum(pos_ic.values())
+
+    if total_pos > 0:
+        raw_ic_w = {k: v / total_pos for k, v in pos_ic.items()}
+        ic_weights: dict[str, float] = {}
+        for k in FACTOR_KEYS:
+            ic_weights[k] = round(raw_ic_w.get(k, 0.0), 4)
+        # 舍入誤差修正：讓權重總和精確 = 1
+        _diff = round(1.0 - sum(ic_weights.values()), 4)
+        if _diff != 0 and pos_ic:
+            _top = max(pos_ic, key=pos_ic.get)
+            ic_weights[_top] = round(ic_weights[_top] + _diff, 4)
+    else:
+        # 全部負相關（極端情況）→ 均等分配
+        n = len(FACTOR_KEYS)
+        ic_weights = {k: round(1 / n, 4) for k in FACTOR_KEYS}
+
+    zeroed = [k for k in FACTOR_KEYS if ic_weights.get(k, 0) == 0]
+
+    # ── 步驟 3：測試期重算 composite ────────────────────────────────────
+    def _composite(row: pd.Series, weights: dict) -> float:
+        total = 0.0
+        for k, w in weights.items():
+            val = row.get(f"score_{k.lower()}")
+            if val is not None and not pd.isna(val):
+                total += float(val) * w
+        return round(total, 3)
+
+    test_df["_c_orig"] = test_df.apply(lambda r: _composite(r, ORIG_WEIGHTS), axis=1)
+    test_df["_c_ic"]   = test_df.apply(lambda r: _composite(r, ic_weights),   axis=1)
+
+    # ── 步驟 4：百分位分組 + spread ──────────────────────────────────────
+    def _grp_result(composite_col: str) -> dict:
+        scores  = test_df[composite_col]
+        returns = test_df["fwd_3m_pct"]
+        _, cuts = assign_groups(scores, method="percentile")
+        h_mask = scores >= cuts["high_cut"]
+        l_mask = scores <= cuts["low_cut"]
+        m_mask = ~h_mask & ~l_mask
+        h_s = _stats(returns[h_mask])
+        l_s = _stats(returns[l_mask])
+        m_s = _stats(returns[m_mask])
+        spread = (
+            round(h_s["mean"] - l_s["mean"], 2)
+            if h_s["mean"] is not None and l_s["mean"] is not None
+            else None
+        )
+        return {
+            "high": h_s, "low": l_s, "hold": m_s,
+            "spread": spread,
+            "direction_ok": spread is not None and spread > 0,
+            "cutpoints": cuts,
+        }
+
+    return {
+        "train_snaps":    list(train_snaps),
+        "test_snaps":     list(test_snaps),
+        "n_train":        len(train_df),
+        "n_test":         len(test_df),
+        "train_corrs":    train_corrs,
+        "orig_weights":   ORIG_WEIGHTS,
+        "ic_weights":     ic_weights,
+        "zeroed_factors": zeroed,
+        "orig_result":    _grp_result("_c_orig"),
+        "ic_result":      _grp_result("_c_ic"),
+    }
+
+
 if __name__ == "__main__":
     print("開始七因子快速回測（50 檔 × 18 時間點，約需 4-6 分鐘）…")
 
