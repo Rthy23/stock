@@ -43,6 +43,37 @@ A Streamlit-based US stock screening and trading dashboard with technical analys
 streamlit run app.py --server.port 5000
 ```
 
+## 權重調整紀錄（2026-08-16）
+
+### 七因子 Composite Score 權重調整
+
+**調整依據**：Walk-Forward 4 切分穩健性驗證（6/9/12/15 個訓練期快照）
+
+| 切分方式 | 訓練期 Momentum IC | Spread 改善 |
+|---|---|---|
+| 6訓/12測 | 負（≈ -0.08） | ❌ |
+| 9訓/9測 | 負（≈ -0.09） | ✅ |
+| 12訓/6測 | 負（≈ -0.08） | ✅ |
+| 15訓/3測 | 負（≈ -0.06） | ❌ |
+
+**判定**：情境 B（保守輕量降權）—— Momentum IC 方向穩定（4/4 次為負），但測試期 spread 改善僅 2/4 次，未達「調整穩定」門檻，採保守策略。
+
+**調整前後對照**：
+
+| 因子 | 調整前 | 調整後 | 變動 |
+|---|---|---|---|
+| Momentum | 20% | **10%** | -10% |
+| Value | 15% | 15% | — |
+| Quality | 20% | 20% | — |
+| Growth | 15% | **20%** | +5% |
+| Volatility | 10% | 10% | — |
+| Sentiment | 10% | **15%** | +5% |
+| Macro | 10% | 10% | — |
+
+**警語**：本次調整基於約 900 筆歷史樣本的初步驗證，樣本量與時間跨度有限，未來仍可能需要重新校準，不保證對未來報酬有預測力。建議正常使用一段時間後觀察是否有異常，而不是立刻進行下一輪調整。
+
+---
+
 ## Recent Changes
 
 - **Telegram real-time notifications** (`notifier.py`): Full alert module with 4-hour deduplication cache, Gemini AI message generator, and 4 checkers: portfolio stop-loss/take-profit, watchlist RSI oversold + SMA50 breakout, macro fear/greed extremes, MPF rebalancing signals. Integrated into `app.py` sidebar ("📱 Telegram 即時通知" expander) with manual check button, test message, auto-trigger toggle, and notification log panel on 我的持倉 page. Requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_USER_ID` secrets.

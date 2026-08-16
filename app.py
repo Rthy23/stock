@@ -2020,6 +2020,7 @@ def main() -> None:
                 resume_info as _bt_resume_info,
                 clear_progress as _bt_clear_progress,
                 run_oos_validation as _bt_oos,
+                run_walk_forward_validation as _bt_wfv,
             )
 
             st.markdown("### 🧪 七因子 Composite Score 回測快照（擴大版）")
@@ -2646,6 +2647,157 @@ def main() -> None:
                             f"測試期僅 {len(_oos['test_snaps'])} 個時間點、約 {_oos['n_test']} 筆資料，"
                             "屬小樣本，統計結論屬初步方向參考，不是決定性證據。"
                             "無論結果如何，均不建議直接依此調整實盤策略。"
+                        )
+
+                    # ── Walk-Forward 多重切分穩健性檢驗 ──────────────────
+                    st.markdown("---")
+                    st.markdown("### 🔁 多重切分穩健性檢驗（Walk-Forward）")
+                    st.caption(
+                        "對 18 個快照時間點做 4 種前進式切分（6/9/12/15 個訓練期），"
+                        "檢驗 IC 調整後的測試期 spread 是否在多數切法中均優於原始權重。"
+                        "純 CPU 統計，不呼叫 API。"
+                    )
+
+                    _wfv = _bt_wfv(records)
+
+                    if "error" in _wfv:
+                        st.warning(f"Walk-Forward 驗證失敗：{_wfv['error']}")
+                    else:
+                        # ── 主比較表 ──────────────────────────────────────
+                        _wfv_rows = ""
+                        for _cut in _wfv["cuts"]:
+                            _mom_ic  = _cut["momentum_ic"]
+                            _mic_str = f"{_mom_ic:+.4f}" if _mom_ic is not None else "N/A"
+                            _mic_col = "#FF7B72" if (_mom_ic or 0) < 0 else "#3FB950"
+                            _sp_o    = _cut["sp_orig"]
+                            _sp_i    = _cut["sp_ic"]
+                            _better  = _cut["ic_better"]
+                            def _fs(v):
+                                return f"{v:+.2f}%" if v is not None else "N/A"
+                            def _fc(v):
+                                return "#3FB950" if (v or 0) > 0 else "#FF7B72"
+                            _wfv_rows += (
+                                f"<tr style='border-bottom:1px solid #21262D;'>"
+                                f"<td style='padding:6px 10px; color:#C9D1D9;'>{_cut['label']}</td>"
+                                f"<td style='text-align:center; padding:6px 8px; "
+                                f"color:{_mic_col}; font-weight:700;'>{_mic_str}</td>"
+                                f"<td style='text-align:center; padding:6px 8px; "
+                                f"color:{_fc(_sp_o)};'>{_fs(_sp_o)}</td>"
+                                f"<td style='text-align:center; padding:6px 8px; "
+                                f"color:{_fc(_sp_i)}; font-weight:700;'>{_fs(_sp_i)}</td>"
+                                f"<td style='text-align:center; padding:6px 8px; font-size:16px;'>"
+                                f"{'✅' if _better else '❌'}</td>"
+                                f"</tr>"
+                            )
+
+                        st.markdown(
+                            f"<div style='background:#1C2128; border:1px solid #30363D; "
+                            f"border-radius:10px; padding:14px 18px; margin-bottom:14px;'>"
+                            f"<table style='width:100%; border-collapse:collapse; font-size:13px;'>"
+                            f"<thead><tr style='border-bottom:1px solid #30363D; color:#8B949E;'>"
+                            f"<th style='text-align:left; padding:5px 10px;'>切分方式</th>"
+                            f"<th style='text-align:center;'>訓練期 Momentum IC</th>"
+                            f"<th style='text-align:center;'>測試期 Spread（原始）</th>"
+                            f"<th style='text-align:center;'>測試期 Spread（IC調整）</th>"
+                            f"<th style='text-align:center;'>改善方向</th>"
+                            f"</tr></thead>"
+                            f"<tbody>{_wfv_rows}</tbody>"
+                            f"</table>"
+                            f"<div style='margin-top:10px; padding-top:8px; "
+                            f"border-top:1px solid #30363D; font-size:12px; color:#8B949E;'>"
+                            f"Momentum IC 為負：{_wfv['mom_neg_count']}/{_wfv['n_cuts']} 次　"
+                            f"IC 調整改善：{_wfv['ic_better_count']}/{_wfv['n_cuts']} 次"
+                            f"</div></div>",
+                            unsafe_allow_html=True,
+                        )
+
+                        # ── 穩健性判定 + 最終權重 ─────────────────────────
+                        _scenario  = _wfv["scenario"]
+                        _dir_ok    = _wfv["direction_stable"]
+                        _imp_ok    = _wfv["improvement_stable"]
+                        _fw        = _wfv["final_weights"]
+                        _ow        = _wfv["orig_weights"]
+
+                        _scen_color = "#3FB950" if _scenario == "A" else "#E3B341"
+                        _scen_icon  = "🟢" if _scenario == "A" else "🟡"
+                        _dir_icon   = "✅" if _dir_ok else "❌"
+                        _imp_icon   = "✅" if _imp_ok else "❌"
+
+                        if _scenario == "A":
+                            _scen_desc = (
+                                "**情境 A：採用均值 IC 調整權重**　"
+                                "Momentum IC 方向穩定（多數切法為負）且 IC 調整改善方向穩定，"
+                                "已套用 4 次切法 IC 權重平均值作為最終權重。"
+                            )
+                        else:
+                            _scen_desc = (
+                                "**情境 B：保守輕量降權**　"
+                                "訊號方向或改善幅度未達穩定標準，採保守策略："
+                                "Momentum 從 20% 下調至 10%，降幅平均補充給 Growth / Sentiment。"
+                            )
+
+                        st.markdown(
+                            f"<div style='background:#161B22; border-left:4px solid {_scen_color}; "
+                            f"padding:12px 16px; border-radius:4px; margin-bottom:12px;'>"
+                            f"<div style='font-size:15px; font-weight:700; color:#E6EDF3; "
+                            f"margin-bottom:8px;'>{_scen_icon} 最終判定：情境 {_scenario}</div>"
+                            f"<div style='font-size:13px; color:#C9D1D9; margin-bottom:8px;'>"
+                            f"{_scen_desc}</div>"
+                            f"<div style='font-size:12px; color:#8B949E;'>"
+                            f"方向穩定性（≥3/4 次負 IC）：{_dir_icon}　"
+                            f"改善穩定性（≥3/4 次 Spread 提升）：{_imp_icon}"
+                            f"</div></div>",
+                            unsafe_allow_html=True,
+                        )
+
+                        # ── 權重對照表 ────────────────────────────────────
+                        with st.expander("📋 最終權重對照表（analysis.py 已套用）",
+                                         expanded=True):
+                            _fk = ["Momentum","Value","Quality","Growth",
+                                   "Volatility","Sentiment","Macro"]
+                            _wt_rows = ""
+                            for _k in _fk:
+                                _wo = _ow.get(_k, 0)
+                                _wf = _fw.get(_k, 0)
+                                _wd = _wf - _wo
+                                _d_col = ("#3FB950" if _wd > 0.005
+                                          else "#FF7B72" if _wd < -0.005
+                                          else "#8B949E")
+                                _d_str = f"{_wd:+.0%}" if abs(_wd) > 0.001 else "—"
+                                _wt_rows += (
+                                    f"<tr style='border-bottom:1px solid #21262D;'>"
+                                    f"<td style='padding:5px 10px;'>{_k}</td>"
+                                    f"<td style='text-align:center; padding:5px 8px;'>{_wo:.0%}</td>"
+                                    f"<td style='text-align:center; padding:5px 8px; "
+                                    f"font-weight:700;'>{_wf:.0%}</td>"
+                                    f"<td style='text-align:center; padding:5px 8px; "
+                                    f"color:{_d_col};'>{_d_str}</td>"
+                                    f"</tr>"
+                                )
+                            st.markdown(
+                                f"<div style='background:#1C2128; border:1px solid #30363D; "
+                                f"border-radius:8px; padding:10px 14px;'>"
+                                f"<table style='width:100%; border-collapse:collapse; "
+                                f"font-size:13px;'>"
+                                f"<thead><tr style='border-bottom:1px solid #30363D; "
+                                f"color:#8B949E;'>"
+                                f"<th style='text-align:left; padding:5px 10px;'>因子</th>"
+                                f"<th style='text-align:center;'>原始</th>"
+                                f"<th style='text-align:center;'>調整後</th>"
+                                f"<th style='text-align:center;'>變動</th>"
+                                f"</tr></thead>"
+                                f"<tbody>{_wt_rows}</tbody>"
+                                f"</table></div>",
+                                unsafe_allow_html=True,
+                            )
+                            _wt_total = sum(_fw.values())
+                            st.caption(f"權重總和 = {_wt_total:.4f}（應 = 1.0000）")
+
+                        st.caption(
+                            "⚠️ 本次調整基於約 900 筆歷史樣本的 Walk-Forward 初步驗證，"
+                            "樣本量與時間跨度有限，未來仍可能需要重新校準，"
+                            "不保證對未來報酬有預測力。建議正常使用一段時間後觀察，"
+                            "而不是立刻進行下一輪調整。"
                         )
 
             elif not run_btn:

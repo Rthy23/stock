@@ -967,10 +967,16 @@ def calculate_seven_factors(
         g["score"] = _mean_score(g["items"])
 
     # ── Composite score (weighted average) ────────────────────────────────
+    # 權重調整紀錄（2026-08-16）：Walk-Forward 4 切分驗證（6/9/12/15 訓練期）
+    # 結果：Momentum 訓練期 IC 4/4 次為負（方向穩定），但測試期 spread 改善
+    # 僅 2/4 次（改善不穩定），判定為情境 B（保守輕量降權）。
+    # Momentum 20% → 10%（降幅 10% 均分補給 Growth +5%、Sentiment +5%）。
+    # 驗證依據：~900 筆歷史快照（50 檔龍頭股 × 18 個雙月時間點，2021-Q4 ~ 2024-Q3）。
+    # 警語：樣本量與時間跨度有限，不保證對未來報酬有預測力，建議觀察一段時間再決定是否再校準。
     weights = {
-        "Momentum": 0.20, "Value": 0.15, "Quality": 0.20,
-        "Growth":   0.15, "Volatility": 0.10,
-        "Sentiment": 0.10, "Macro": 0.10,
+        "Momentum": 0.10, "Value": 0.15, "Quality": 0.20,
+        "Growth":   0.20, "Volatility": 0.10,
+        "Sentiment": 0.15, "Macro": 0.10,
     }
     composite = sum(groups[k]["score"] * w for k, w in weights.items())
     composite  = round(composite, 2)

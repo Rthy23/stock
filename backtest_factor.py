@@ -623,6 +623,198 @@ def run_factor_backtest(
     }
 
 
+# ── Walk-Forward 多重切分穩健性檢驗 ──────────────────────────────────────────
+def run_walk_forward_validation(records: list[dict]) -> dict:
+    """
+    對 18 個時間點做 4 種不同的前進式訓練/測試切分，評估 IC 調整權重的穩健性。
+
+    切法
+    ----
+    1.  6 訓 / 12 測
+    2.  9 訓 /  9 測
+    3. 12 訓 /  6 測  （與 run_oos_validation 的標準切法相同）
+    4. 15 訓 /  3 測
+
+    判定規則
+    --------
+    「方向穩定」：4 次中 ≥ 3 次 Momentum 訓練期 IC < 0
+    「改善穩定」：4 次中 ≥ 3 次 IC 調整後測試期 spread > 原始 spread
+    兩者皆成立 → 情境 A（套用均值 IC 調整權重）
+    任一不成立 → 情境 B（保守輕量降權：Momentum 20%→10%，降幅均分給 Growth/Sentiment）
+
+    回傳 dict
+    ---------
+    cuts, mom_neg_count, ic_better_count,
+    direction_stable, improvement_stable,
+    scenario ("A" | "B"),
+    orig_weights, final_weights,
+    per_cut_ic_weights   (4 組 IC 權重，供情境 A 平均使用)
+    """
+    if not records:
+        return {"error": "無資料"}
+
+    df = pd.DataFrame(records)
+    if "snapshot" not in df.columns or "fwd_3m_pct" not in df.columns:
+        return {"error": "資料缺少必要欄位"}
+
+    ORIG_WEIGHTS: dict[str, float] = {
+        "Momentum":   0.20, "Value":      0.15, "Quality":    0.20,
+        "Growth":     0.15, "Volatility": 0.10,
+        "Sentiment":  0.10, "Macro":      0.10,
+    }
+    FK = list(ORIG_WEIGHTS.keys())
+
+    all_snaps = sorted(df["snapshot"].unique())
+    if len(all_snaps) < 6:
+        return {"error": f"快照時間點僅 {len(all_snaps)} 個（需至少 6 個）"}
+
+    SPLITS = [
+        (6,  "6訓/12測"),
+        (9,  "9訓/9測"),
+        (12, "12訓/6測"),
+        (15, "15訓/3測"),
+    ]
+
+    cuts_results: list[dict] = []
+    per_cut_ic_weights: list[dict] = []
+
+    for n_train, label in SPLITS:
+        train_snaps = all_snaps[:n_train]
+        test_snaps  = all_snaps[n_train:]
+        if len(test_snaps) < 1:
+            continue
+
+        train_df = df[df["snapshot"].isin(train_snaps)].copy()
+        test_df  = df[df["snapshot"].isin(test_snaps)].copy()
+        if len(test_df) < 5:
+            continue
+
+        # 訓練期 IC
+        train_corrs: dict[str, Optional[float]] = {}
+        for k in FK:
+            col = f"score_{k.lower()}"
+            if col not in train_df.columns:
+                train_corrs[k] = None
+                continue
+            sub = train_df[[col, "fwd_3m_pct"]].dropna()
+            train_corrs[k] = (
+                round(float(sub[col].corr(sub["fwd_3m_pct"])), 4)
+                if len(sub) >= 10 else None
+            )
+
+        # IC 調整權重
+        pos_ic = {k: v for k, v in train_corrs.items() if v is not None and v > 0}
+        total_pos = sum(pos_ic.values())
+        if total_pos > 0:
+            ic_w: dict[str, float] = {
+                k: round(pos_ic.get(k, 0.0) / total_pos, 4) for k in FK
+            }
+            # 舍入修正
+            diff = round(1.0 - sum(ic_w.values()), 4)
+            if diff != 0 and pos_ic:
+                top = max(pos_ic, key=pos_ic.get)
+                ic_w[top] = round(ic_w[top] + diff, 4)
+        else:
+            ic_w = {k: round(1 / len(FK), 4) for k in FK}
+
+        per_cut_ic_weights.append(ic_w)
+
+        # 測試期重算 composite
+        def _comp(row: pd.Series, wt: dict) -> float:
+            return round(sum(
+                float(row.get(f"score_{k.lower()}") or 0) * w
+                for k, w in wt.items()
+            ), 3)
+
+        test_df["_c_orig"] = test_df.apply(lambda r: _comp(r, ORIG_WEIGHTS), axis=1)
+        test_df["_c_ic"]   = test_df.apply(lambda r: _comp(r, ic_w),          axis=1)
+
+        def _spread(col: str) -> "tuple[Optional[float], dict, dict]":
+            sc  = test_df[col]
+            ret = test_df["fwd_3m_pct"]
+            _, c = assign_groups(sc, method="percentile")
+            hs = _stats(ret[sc >= c["high_cut"]])
+            ls = _stats(ret[sc <= c["low_cut"]])
+            sp = (
+                round(hs["mean"] - ls["mean"], 2)
+                if hs["mean"] is not None and ls["mean"] is not None
+                else None
+            )
+            return sp, hs, ls
+
+        sp_orig, h_orig, l_orig = _spread("_c_orig")
+        sp_ic,   h_ic,   l_ic   = _spread("_c_ic")
+        ic_better = (sp_ic is not None and sp_orig is not None
+                     and sp_ic > sp_orig)
+
+        cuts_results.append({
+            "label":        label,
+            "n_train_snaps": len(train_snaps),
+            "n_test_snaps":  len(test_snaps),
+            "n_train":       len(train_df),
+            "n_test":        len(test_df),
+            "train_corrs":   train_corrs,
+            "ic_weights":    ic_w,
+            "momentum_ic":   train_corrs.get("Momentum"),
+            "sp_orig":       sp_orig,
+            "sp_ic":         sp_ic,
+            "high_orig":     h_orig,
+            "low_orig":      l_orig,
+            "high_ic":       h_ic,
+            "low_ic":        l_ic,
+            "ic_better":     ic_better,
+        })
+
+    if not cuts_results:
+        return {"error": "所有切法均無法執行（資料不足）"}
+
+    # 穩健性判定
+    mom_neg  = sum(1 for r in cuts_results
+                   if r["momentum_ic"] is not None and r["momentum_ic"] < 0)
+    ic_better_n = sum(1 for r in cuts_results if r["ic_better"])
+    dir_stable  = mom_neg  >= 3
+    imp_stable  = ic_better_n >= 3
+    scenario    = "A" if (dir_stable and imp_stable) else "B"
+
+    # 最終權重
+    if scenario == "A" and per_cut_ic_weights:
+        # 4 組 IC 權重的均值，再正規化
+        avg: dict[str, float] = {}
+        for k in FK:
+            avg[k] = round(
+                sum(w.get(k, 0) for w in per_cut_ic_weights) / len(per_cut_ic_weights),
+                4,
+            )
+        total = sum(avg.values())
+        if total > 0:
+            avg = {k: round(v / total, 4) for k, v in avg.items()}
+        # 舍入修正
+        diff = round(1.0 - sum(avg.values()), 4)
+        if diff != 0:
+            top = max(avg, key=avg.get)
+            avg[top] = round(avg[top] + diff, 4)
+        final_weights = avg
+    else:
+        # 情境 B：保守輕量降權
+        final_weights = dict(ORIG_WEIGHTS)
+        final_weights["Momentum"]  = round(final_weights["Momentum"]  - 0.10, 2)
+        final_weights["Growth"]    = round(final_weights["Growth"]    + 0.05, 2)
+        final_weights["Sentiment"] = round(final_weights["Sentiment"] + 0.05, 2)
+
+    return {
+        "cuts":               cuts_results,
+        "mom_neg_count":      mom_neg,
+        "ic_better_count":    ic_better_n,
+        "direction_stable":   dir_stable,
+        "improvement_stable": imp_stable,
+        "scenario":           scenario,
+        "orig_weights":       ORIG_WEIGHTS,
+        "final_weights":      final_weights,
+        "per_cut_ic_weights": per_cut_ic_weights,
+        "n_cuts":             len(cuts_results),
+    }
+
+
 # ── 樣本外驗證：訓練期 / 測試期時間切分 ──────────────────────────────────────
 def run_oos_validation(records: list[dict]) -> dict:
     """
