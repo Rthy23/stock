@@ -2016,6 +2016,7 @@ def main() -> None:
                 BACKTEST_STOCKS as _BT_STOCKS,
                 _SNAPSHOT_DATES as _BT_SNAPS,
                 run_factor_backtest, load_cache, clear_cache, cache_info,
+                compute_summary as _bt_compute_summary,
             )
 
             st.markdown("### 🧪 七因子 Composite Score 回測快照（擴大版）")
@@ -2117,24 +2118,42 @@ def main() -> None:
             # ── 顯示結果 ──────────────────────────────────────────────────
             result = st.session_state.get("factor_bt_result")
             if result:
-                summary = result.get("summary") or {}
-                records = result.get("records", [])
-                warns   = result.get("warnings", [])
+                records   = result.get("records", [])
+                warns     = result.get("warnings", [])
                 is_cached = result.get("from_cache", False)
 
                 if is_cached:
                     st.caption("📂 顯示的是快取結果（非本次即時計算）")
 
-                if not summary or summary.get("n_total", 0) == 0:
+                if not records:
                     st.warning("回測未能產生有效資料，請確認網路連線後重試。")
                 else:
+                    # ── 分組方式選擇器（即時重算，不觸發 API）────────────
+                    _grp_method = st.radio(
+                        "📐 分組方式",
+                        options=["percentile", "fixed"],
+                        format_func=lambda x: (
+                            "🎯 百分位動態分組（前/後25%，推薦）"
+                            if x == "percentile"
+                            else "📏 固定絕對值門檻（±1.0，舊版）"
+                        ),
+                        horizontal=True,
+                        key="factor_bt_grp_method",
+                        help=(
+                            "百分位：依本次樣本分佈自動計算切點，三組均有樣本。\n"
+                            "固定門檻：composite > 1.0 / < -1.0，龍頭股池常造成低分組 0 筆。"
+                        ),
+                    )
+
+                    # 純 CPU 重算，不呼叫任何 yfinance
+                    summary = _bt_compute_summary(records, method=_grp_method)
+
                     h      = summary["high"]
                     l      = summary["low"]
                     m      = summary["hold"]
                     spread = summary.get("spread")
                     n_tot  = summary["n_total"]
-                    n_stocks   = summary.get("n_stocks", len(_BT_STOCKS))
-                    n_snaps    = summary.get("n_snapshots", len(_BT_SNAPS))
+                    cuts   = summary.get("cutpoints", {})
 
                     direction_icon = "✅" if summary.get("direction_ok") else "❌"
                     direction_text = "符合預期（高分 > 低分）" if summary.get("direction_ok") else "不符合預期（高分 ≤ 低分）"
@@ -2145,12 +2164,35 @@ def main() -> None:
                     def _ret_color(v):
                         return "#3FB950" if (v or 0) >= 0 else "#FF7B72"
 
+                    # ── 分組說明卡（切點資訊）─────────────────────────────
+                    if cuts.get("method") == "percentile":
+                        _cut_note = (
+                            f"本次分組依分數分佈動態切分（非固定絕對值，隨股票池與市場狀況變動）：<br>"
+                            f"&nbsp;&nbsp;🟢 前25% 門檻 = <b>{cuts['high_cut']:.2f} 分</b>"
+                            f"&nbsp;&nbsp;🔴 後25% 門檻 = <b>{cuts['low_cut']:.2f} 分</b>"
+                        )
+                    else:
+                        _cut_note = (
+                            "使用固定門檻：🟢 score &gt; 1.0 &nbsp;|&nbsp; 🔴 score &lt; -1.0"
+                        )
+                    st.markdown(
+                        f"<div style='background:#161B22; border-left:3px solid #388BFD; "
+                        f"padding:8px 14px; border-radius:4px; font-size:12px; "
+                        f"color:#8B949E; margin-bottom:10px;'>{_cut_note}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                    # ── 主結果表 ──────────────────────────────────────────
+                    _lbl_high = cuts.get("label_high", "高分組")
+                    _lbl_low  = cuts.get("label_low",  "低分組")
+                    _lbl_hold = cuts.get("label_hold", "觀望組")
+
                     st.markdown(
                         f"""
 <div style='background:#1C2128; border:1px solid #30363D; border-radius:10px;
      padding:16px 20px; margin-bottom:14px;'>
 <div style='font-size:15px; font-weight:700; color:#E6EDF3; margin-bottom:10px;'>
-  📊 回測快照（{n_stocks} 檔股票 · 近 3 年 · {n_snaps} 個時間點 · 共 {n_tot} 筆有效資料）
+  📊 回測快照（{len(_BT_STOCKS)} 檔 · 近 3 年 · {len(_BT_SNAPS)} 個時間點 · 共 {n_tot} 筆有效資料）
 </div>
 <table style='width:100%; border-collapse:collapse; font-size:13px;'>
   <thead>
@@ -2164,7 +2206,7 @@ def main() -> None:
   </thead>
   <tbody>
     <tr style='border-bottom:1px solid #21262D;'>
-      <td style='padding:6px 8px; color:#3FB950; font-weight:600;'>🟢 高分組（composite > 1.0）</td>
+      <td style='padding:6px 8px; color:#3FB950; font-weight:600;'>🟢 高分組（{_lbl_high}）</td>
       <td style='text-align:center; padding:6px 8px;'>{h['n']}{_low_n_note(h['n'])}</td>
       <td style='text-align:center; padding:6px 8px; color:{_ret_color(h["mean"])}; font-weight:700;'>
         {f"{h['mean']:+.2f}%" if h["mean"] is not None else "N/A"}</td>
@@ -2174,7 +2216,7 @@ def main() -> None:
         {f"{h['win_rate']:.1f}%" if h["win_rate"] is not None else "N/A"}</td>
     </tr>
     <tr style='border-bottom:1px solid #21262D;'>
-      <td style='padding:6px 8px; color:#8B949E;'>⚪ 觀望組（-1 ≤ composite ≤ 1）</td>
+      <td style='padding:6px 8px; color:#8B949E;'>⚪ 觀望組（{_lbl_hold}）</td>
       <td style='text-align:center; padding:6px 8px;'>{m['n']}{_low_n_note(m['n'])}</td>
       <td style='text-align:center; padding:6px 8px; color:{_ret_color(m["mean"])}'>
         {f"{m['mean']:+.2f}%" if m["mean"] is not None else "N/A"}</td>
@@ -2184,7 +2226,7 @@ def main() -> None:
         {f"{m['win_rate']:.1f}%" if m["win_rate"] is not None else "N/A"}</td>
     </tr>
     <tr>
-      <td style='padding:6px 8px; color:#FF7B72; font-weight:600;'>🔴 低分組（composite < -1.0）</td>
+      <td style='padding:6px 8px; color:#FF7B72; font-weight:600;'>🔴 低分組（{_lbl_low}）</td>
       <td style='text-align:center; padding:6px 8px;'>{l['n']}{_low_n_note(l['n'])}</td>
       <td style='text-align:center; padding:6px 8px; color:{_ret_color(l["mean"])}; font-weight:700;'>
         {f"{l['mean']:+.2f}%" if l["mean"] is not None else "N/A"}</td>
@@ -2205,12 +2247,17 @@ def main() -> None:
   <span style='color:#E6EDF3;'>{direction_icon} {direction_text}</span>
 </div>
 <div style='margin-top:6px; font-size:11px; color:#8B949E;'>
-  ⚠️ 欄位標有「樣本偏少」者樣本 n &lt; 30，統計可靠性低，結果僅供參考。
+  ⚠️ 欄位標有「樣本偏少」者 n &lt; 30，統計可靠性低，結果僅供參考。
 </div>
 </div>
                         """,
                         unsafe_allow_html=True,
                     )
+
+                    # ── 早期快照異常注記 ──────────────────────────────────
+                    _early_note = summary.get("early_note")
+                    if _early_note:
+                        st.caption(_early_note)
 
                     # ── 可信度評估 ────────────────────────────────────────
                     st.markdown("#### 📋 結果解讀")

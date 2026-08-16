@@ -130,6 +130,132 @@ def _build_factor_data(info: dict) -> dict:
     }
 
 
+# ── 分組指派（支援兩種模式）────────────────────────────────────────────────────
+def assign_groups(
+    composite_scores: "pd.Series",
+    method: str = "percentile",
+) -> "tuple[pd.Series, dict]":
+    """
+    把每筆資料的 composite score 指派到 'high' / 'hold' / 'low'。
+
+    method='percentile'（預設）
+        high ≥ P75（前25%）、low ≤ P25（後25%）、hold 其餘中間50%
+        → 不論分佈如何，三組一定都有樣本
+
+    method='fixed'
+        high > 1.0、low < -1.0、hold -1 ~ 1
+        → 與舊版相同，但龍頭股池容易造成低分組 0 筆
+    """
+    if method == "percentile":
+        p25 = float(composite_scores.quantile(0.25))
+        p75 = float(composite_scores.quantile(0.75))
+        grp = pd.Series("hold", index=composite_scores.index, dtype=str)
+        grp[composite_scores >= p75] = "high"
+        grp[composite_scores <= p25] = "low"
+        cuts = {
+            "method":   "percentile",
+            "high_cut": round(p75, 3),
+            "low_cut":  round(p25, 3),
+            "label_high": f"前25%（score ≥ {p75:.2f}）",
+            "label_low":  f"後25%（score ≤ {p25:.2f}）",
+            "label_hold": f"中間50%（{p25:.2f} < score < {p75:.2f}）",
+        }
+    else:  # fixed
+        grp = pd.Series("hold", index=composite_scores.index, dtype=str)
+        grp[composite_scores >  1.0] = "high"
+        grp[composite_scores < -1.0] = "low"
+        cuts = {
+            "method":   "fixed",
+            "high_cut": 1.0,
+            "low_cut":  -1.0,
+            "label_high": "score > 1.0",
+            "label_low":  "score < -1.0",
+            "label_hold": "-1.0 ≤ score ≤ 1.0",
+        }
+    return grp, cuts
+
+
+# ── 早期快照分數異常檢查 ──────────────────────────────────────────────────────
+def _check_early_score_anomaly(df: "pd.DataFrame") -> "Optional[str]":
+    """
+    檢查最早 3 個快照時間點的 Momentum / Macro 分數是否異常集中在 0
+    （原因：SMA200 需要 200 日歷史，最早時間點可能歷史不足）。
+    若 >30% 為 0，回傳注意說明文字；否則回傳 None。
+    """
+    if "snapshot" not in df.columns:
+        return None
+    early_dates = sorted(df["snapshot"].unique())[:3]
+    early_df = df[df["snapshot"].isin(early_dates)]
+    if early_df.empty:
+        return None
+    notes = []
+    for col, label in [("score_momentum", "Momentum"), ("score_macro", "Macro")]:
+        if col in df.columns and len(early_df) > 0:
+            zero_pct = (early_df[col] == 0).mean()
+            if zero_pct > 0.30:
+                notes.append(f"{label}（{zero_pct:.0%} 為 0）")
+    if notes:
+        return (
+            f"⚠️ 最早 3 個快照（{', '.join(early_dates[:3])}）的 "
+            f"{' / '.join(notes)} 因子分數有較多 0 值，"
+            f"可能因歷史資料不足（SMA200 需 200 日）輕微影響早期評分鑑別度，"
+            f"不影響整體結論方向。"
+        )
+    return None
+
+
+# ── 從 records 重算 summary（不呼叫任何 API）──────────────────────────────────
+def compute_summary(records: "list[dict]", method: str = "percentile") -> dict:
+    """
+    從現有 records 重新計算分組統計，純 CPU 運算，不抓資料。
+    可對快取資料即時切換分組方式（percentile / fixed）。
+
+    Parameters
+    ----------
+    records : list[dict]
+        run_factor_backtest 回傳的原始記錄，需含 composite 和 fwd_3m_pct 欄位。
+    method : str
+        'percentile'（預設）或 'fixed'。
+
+    Returns
+    -------
+    dict 含所有 UI 需要的統計資訊。
+    """
+    if not records:
+        return {}
+
+    df = pd.DataFrame(records)
+    if "composite" not in df.columns or "fwd_3m_pct" not in df.columns:
+        return {}
+
+    grp, cuts = assign_groups(df["composite"], method=method)
+    df = df.copy()
+    df["_group"] = grp
+
+    high_stats = _stats(df[df["_group"] == "high"]["fwd_3m_pct"])
+    low_stats  = _stats(df[df["_group"] == "low"]["fwd_3m_pct"])
+    mid_stats  = _stats(df[df["_group"] == "hold"]["fwd_3m_pct"])
+
+    spread = None
+    if high_stats["mean"] is not None and low_stats["mean"] is not None:
+        spread = round(high_stats["mean"] - low_stats["mean"], 2)
+
+    factor_corrs = compute_factor_correlations(records)
+    early_note   = _check_early_score_anomaly(df)
+
+    return {
+        "n_total":      len(df),
+        "high":         high_stats,
+        "low":          low_stats,
+        "hold":         mid_stats,
+        "spread":       spread,
+        "direction_ok": spread is not None and spread > 0,
+        "cutpoints":    cuts,
+        "factor_corrs": factor_corrs,
+        "early_note":   early_note,
+    }
+
+
 # ── 子因子相關係數計算 ────────────────────────────────────────────────────────
 def compute_factor_correlations(records: list[dict]) -> list[dict]:
     """
