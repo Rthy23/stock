@@ -11,7 +11,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ark_holdings import (
-    ArkHoldingsError, SOURCE_URL, compare_snapshots, get_ark_holdings, parse_holdings,
+    ArkHoldingsError, ArkStorageError, SOURCE_URL, compare_snapshots,
+    get_ark_holdings, parse_holdings,
 )
 from page_modules.ark_holdings import render_ark_holdings
 from kol_whitelist import PICKS_DATA, build_consensus_table, call_gemini_consensus, score_picks
@@ -131,6 +132,20 @@ class ArkHoldingsTests(unittest.TestCase):
             self.assertIn("日期早於", result["error"])
             self.assertEqual(result["current"]["date"], "2026-09-29")
             self.assertEqual(len(list(directory.glob("ARKK_*.json"))), 1)
+
+    def test_database_failure_never_falls_back_to_local_snapshot(self):
+        # Even with a legacy snapshot present, a DB failure must be visible.
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot = parse_holdings(official_csv(), today=datetime(
+                2026, 9, 28, 17, tzinfo=timezone.utc))
+            path = Path(tmp) / "ARKK_2026-09-28.json"
+            path.write_text(json.dumps(snapshot), encoding="utf-8")
+            with patch("ark_holdings.CACHE_DIR", Path(tmp)), patch(
+                "ark_holdings.PostgresArkStore"
+            ) as postgres:
+                postgres.return_value.status.side_effect = ArkStorageError("資料庫不可用")
+                with self.assertRaisesRegex(ArkStorageError, "資料庫不可用"):
+                    get_ark_holdings(fetcher=lambda: self.fail("cannot fetch without DB"))
 
     def test_real_section_labels_and_first_day_no_change_table(self):
         snapshot = parse_holdings(official_csv(), today=datetime(

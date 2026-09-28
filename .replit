@@ -1,10 +1,10 @@
-modules = ["python-3.12", "nodejs-24"]
+modules = ["python-3.12", "nodejs-24", "postgresql-16"]
 [agent]
 expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["freetype", "glibcLocales", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "psmisc", "tcl", "tk", "zlib"]
+packages = ["freetype", "glibcLocales", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "postgresql", "psmisc", "tcl", "tk", "zlib"]
 
 [workflows]
 runButton = "Project"

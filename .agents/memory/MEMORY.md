@@ -1,2 +1,3 @@
 - [Streamlit preview port](streamlit-preview-port.md) — Replit webview workflows require Streamlit to bind 0.0.0.0:5000 consistently.
 - [Streamlit pages routing](streamlit-pages-routing.md) — files under pages/ are auto-discovered, so embedded page modules also need direct execution entry points.
+- [Secret confirmation](secret-confirmation.md) — secure-form confirmation can preserve an invalid existing value; ask for an explicit overwrite when validation still fails.

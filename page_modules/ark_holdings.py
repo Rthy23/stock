@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from ark_holdings import (
-    ArkHoldingsError, DOCUMENTS_URL, SOURCE_URL, get_ark_holdings,
+    ArkHoldingsError, ArkStorageError, DOCUMENTS_URL, SOURCE_URL, get_ark_holdings,
 )
 
 
@@ -26,10 +26,15 @@ def render_ark_holdings() -> None:
         "的基金持倉，不是 Cathie Wood 個人即時推薦或逐筆交易紀錄；"
         "與 SEC 13F 及未查核示範排名分開展示。"
     )
+    st.caption(
+        "開啟此區塊時查詢官方檔案；成功取得的不同持倉日期保存在持久化資料庫。"
+        "只有已收集到至少兩個不同實際日期、且識別碼與股數可比時才顯示變化；"
+        "不會用模擬或推算的前一天快照補齊。"
+    )
     st.markdown(f"[ARK 官方文件頁]({DOCUMENTS_URL}) · [原始 ARKK 持倉 CSV]({SOURCE_URL})")
     try:
         result = get_ark_holdings()
-    except (ArkHoldingsError, OSError) as exc:
+    except (ArkHoldingsError, ArkStorageError, OSError) as exc:
         st.error(f"ARK 快照無法讀取或儲存：{exc} 不會以模擬資料替代。")
         return
     current = result["current"]

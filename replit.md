@@ -59,6 +59,21 @@ The SEC panel shows institution-level quarter-end long positions only. It checks
 filer names at runtime, caches data for one day, and does not infer ticker symbols
 from CUSIPs or equate holdings with a manager's advice or current trades.
 
+## ARKK official daily holdings
+
+ARKK's official CSV is displayed separately from SEC 13F and the unverified
+recommendation ranking. The app stores dated official snapshots in the project's
+managed PostgreSQL database, not the local `.cache` directory. The schema source
+is `schema/ark_holdings.sql`; apply it to development before running the feature.
+Replit Publish propagates the development schema to the managed production
+database; do not create tables at app startup or modify production schema
+directly. A previous local snapshot may be imported only after validation.
+The official CSV is fetched when the section is viewed (not by a background
+schedule); comparing holdings requires two saved, distinct official dates and
+valid CUSIP/share fields. If the database or source fails, show the problem,
+not fabricated holdings or a local-file fallback. The first published visit
+cannot retroactively reconstruct missing historic days.
+
 ## 權重調整紀錄（2026-08-16）
 
 ### 七因子 Composite Score 權重調整

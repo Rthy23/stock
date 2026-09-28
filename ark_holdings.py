@@ -16,6 +16,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from ark_snapshot_store import ArkStorageError, PostgresArkStore
+
 
 FUND = "ARKK"
 SOURCE_URL = (
@@ -149,6 +151,40 @@ def _write_json(path: Path, value: dict) -> None:
             os.unlink(name)
 
 
+class FileArkStore:
+    """Existing file-backed store, retained only for isolated tests and old imports."""
+
+    def __init__(self, directory: Path):
+        self.directory = directory
+
+    def status(self) -> dict:
+        return _read_json(self.directory / "status.json")
+
+    def latest(self) -> list[dict]:
+        return [
+            _read_json(path)
+            for path in sorted(self.directory.glob(f"{FUND}_????-??-??.json"), reverse=True)[:2]
+        ]
+
+    def save_snapshot(self, snapshot: dict) -> None:
+        _write_json(self.directory / f"{FUND}_{snapshot['date']}.json", snapshot)
+
+    def save_status(self, status: dict) -> None:
+        _write_json(self.directory / "status.json", status)
+
+
+def _import_legacy_snapshots(storage: PostgresArkStore) -> list[dict]:
+    """Import only genuine, previously saved official snapshots on first DB use."""
+    for path in sorted(CACHE_DIR.glob(f"{FUND}_????-??-??.json")):
+        snapshot = _read_json(path)
+        if (snapshot.get("fund") != FUND or snapshot.get("source_url") != SOURCE_URL
+                or snapshot.get("date") != path.stem.removeprefix(f"{FUND}_")
+                or not isinstance(snapshot.get("holdings"), list) or not snapshot["holdings"]):
+            raise ArkHoldingsError("既有 ARK 快照格式無法核對，不匯入持久化資料庫。")
+        storage.save_snapshot(snapshot)
+    return storage.latest()
+
+
 def compare_snapshots(current: dict, previous: dict | None) -> tuple[list[dict], str | None]:
     """Compare reported share counts by official CUSIP; never infer actual trades."""
     if previous is None or current["date"] <= previous["date"]:
@@ -191,19 +227,21 @@ def compare_snapshots(current: dict, previous: dict | None) -> tuple[list[dict],
 
 
 def get_ark_holdings(
-    *, cache_dir: Path | None = None, now: datetime | None = None, fetcher=None
+    *, cache_dir: Path | None = None, now: datetime | None = None, fetcher=None,
+    store: PostgresArkStore | FileArkStore | None = None,
 ) -> dict:
-    """Refresh at most once per UTC day on success; retain dated actual snapshots."""
-    directory = cache_dir if cache_dir is not None else CACHE_DIR
+    """Use durable dated snapshots in production; file storage is test-only."""
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
     fetcher = fetcher or fetch_holdings
-    status_path = directory / "status.json"
-    status = _read_json(status_path)
-    snapshots = sorted(directory.glob(f"{FUND}_????-??-??.json"), reverse=True)
-    current = _read_json(snapshots[0]) if snapshots else None
-    previous = _read_json(snapshots[1]) if len(snapshots) > 1 else None
+    storage = store or (FileArkStore(cache_dir) if cache_dir is not None else PostgresArkStore())
+    status = storage.status()
+    snapshots = storage.latest()
+    if not snapshots and isinstance(storage, PostgresArkStore):
+        snapshots = _import_legacy_snapshots(storage)
+    current = snapshots[0] if snapshots else None
+    previous = snapshots[1] if len(snapshots) > 1 else None
     checked_at = status.get("checked_at")
     recent = False
     if checked_at:
@@ -230,7 +268,7 @@ def get_ark_holdings(
             if current and fetched["date"] < current["date"]:
                 raise ArkHoldingsError("ARK 官網 CSV 日期早於最近成功快照。")
             if not current or fetched["date"] != current["date"] or fetched != current:
-                _write_json(directory / f"{FUND}_{fetched['date']}.json", fetched)
+                storage.save_snapshot(fetched)
             if current and fetched["date"] > current["date"]:
                 previous = current
             unchanged = bool(current and fetched["date"] == current["date"] and checked_at)
@@ -246,7 +284,7 @@ def get_ark_holdings(
                 "error": str(exc),
                 "unchanged_on_refresh": False,
             }
-        _write_json(status_path, status)
+        storage.save_status(status)
     changes, comparison_note = compare_snapshots(current, previous) if current else ([], None)
     return {
         "current": current,
