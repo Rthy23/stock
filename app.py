@@ -363,7 +363,7 @@ def main() -> None:
         "📡 總體市場 (Macro)",
         "📊 板塊分析 (Sector)",
         "🌐 國際市場 (Global)",
-        "🏦 分析師共識 (Consensus)",
+        "🏦 官方持倉 (Holdings)",
         "🧭 資產配置 (Allocation)",
         "🔬 個股診斷 (Micro)",
         "💼 我的持倉",
@@ -558,38 +558,8 @@ def main() -> None:
 
         st.markdown("---")
 
-        # ── Tab 3: KOL whitelist management ──────────────────────────────────
-        st.markdown("**📝 KOL / 分析師白名單**")
-        st.caption("輸入 X 或 Threads 帳號（含 @ 符號），加入爬蟲監控清單。")
-        _kol_list = load_kol_whitelist()
-        if _kol_list:
-            for _kh in _kol_list:
-                _kc1, _kc2 = st.columns([3, 1])
-                with _kc1:
-                    st.markdown(f"`{_kh}`")
-                with _kc2:
-                    if st.button("✕", key=f"kol_rm_{_kh}",
-                                 use_container_width=True):
-                        remove_kol(_kh)
-                        st.rerun()
-        else:
-            st.caption("尚未加入任何 KOL。")
-
-        _kol_col1, _kol_col2 = st.columns([3, 1])
-        with _kol_col1:
-            _kol_input = st.text_input(
-                "KOL 帳號", placeholder="@handle",
-                key="sidebar_kol_add_input", label_visibility="collapsed",
-            )
-        with _kol_col2:
-            if st.button("加入", key="sidebar_kol_add_btn",
-                         use_container_width=True):
-                _ok, _msg = add_kol(_kol_input)
-                if _ok:
-                    st.success(_msg)
-                    st.rerun()
-                else:
-                    st.error(_msg)
+        # Unverified analyst recommendations have no public submission workflow.
+        st.info("分析師推薦暫不提供；現有示範紀錄沒有可查核的來源。")
 
     # ── Benchmark monitor ─────────────────────────────────────────────────────
     st.sidebar.markdown("---")
@@ -859,7 +829,7 @@ def main() -> None:
     # ══════════════════════════════════════════════════════════════════════════
     # PAGE 4 — Analyst consensus
     # ══════════════════════════════════════════════════════════════════════════
-    elif page == "🏦 分析師共識 (Consensus)":
+    elif page == "🏦 官方持倉 (Holdings)":
         render_analyst_consensus_page()
 
     # ══════════════════════════════════════════════════════════════════════════

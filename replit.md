@@ -52,8 +52,12 @@ address is used by the application. It is sent in the HTTP User-Agent to the SEC
 If unset or if SEC data fails validation, the panel reports unavailable and never
 substitutes the old simulated analyst picks. The old picks remain on disk for
 non-destructive migration, but the eight 13F managers are excluded from recommendation
-ranking, pick management, and AI consensus input. The separate remaining example
-recommendations retain a prominent simulated-data warning.
+ranking, pick management, and AI consensus input. The remaining 14 example
+recommendations (Howard Marks, Jeremy Siegel, Seeking Alpha Quant, Charlie Munger)
+also have no checkable primary-source statements or dates; all example ranking,
+pick management and AI summaries are disabled. Historical JSON is preserved
+but not public. The official holdings page shows only SEC and ARKK disclosures,
+plus unavailable notices; no composite ranking or Yahoo rating leaderboard.
 
 The SEC panel shows institution-level quarter-end long positions only. It checks
 filer names at runtime, caches data for one day, and does not infer ticker symbols

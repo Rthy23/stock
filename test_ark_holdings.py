@@ -175,8 +175,8 @@ class ArkHoldingsTests(unittest.TestCase):
                  "argument_quality": 3, "thesis": "unverified"},
             ]
             picks_store.save_picks(records)
-            self.assertEqual([p["_storage_index"] for p in picks_store.get_picks_with_status()], [1])
-            self.assertEqual([r["ticker"] for r in build_consensus_table()], ["HYG"])
+            self.assertEqual(picks_store.get_picks_with_status(), [])
+            self.assertEqual(build_consensus_table(), [])
             self.assertEqual([r["ticker"] for r in build_consensus_table(
                 picks=records, whitelist=[{"id": "cathie_wood", "rep": 5, "name": "Cathie Wood"}]
             )], [])
@@ -204,8 +204,8 @@ class ArkHoldingsTests(unittest.TestCase):
         with patch("gemini_helper.call_gemini_cached",
                    return_value='{"summary":"x","confidence":3,"reason":"y"}') as ai:
             result = call_gemini_consensus([mixed], "test")
-        self.assertEqual(result[0]["experts"], ["Howard Marks"])
-        self.assertNotIn("invented personal recommendation", ai.call_args.args[0])
+        self.assertEqual(result, [])
+        ai.assert_not_called()
 
 
 if __name__ == "__main__":

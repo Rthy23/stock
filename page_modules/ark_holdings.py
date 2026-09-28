@@ -24,7 +24,7 @@ def render_ark_holdings() -> None:
     st.info(
         "資料來源：ARK Invest 官方每日持倉揭露。這是 **ARK Innovation ETF（ARKK）**"
         "的基金持倉，不是 Cathie Wood 個人即時推薦或逐筆交易紀錄；"
-        "與 SEC 13F 及未查核示範排名分開展示。"
+        "與 SEC 13F 分開展示；未查核示範排名已停用。"
     )
     st.caption(
         "開啟此區塊時查詢官方檔案；成功取得的不同持倉日期保存在持久化資料庫。"

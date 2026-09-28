@@ -446,11 +446,10 @@ def _render_curated_consensus() -> None:
 
 
 def render_analyst_consensus_page() -> None:
-    st.title("🏦 分析師共識與 Recommendations 排行榜")
+    st.title("🏦 官方機構與基金持倉")
     st.caption(
-        "SEC 13F 季末申報、ARKK 官方每日基金持倉與示範推薦排行彼此獨立。"
-        "最下方為 Yahoo Finance 對每支標的所彙整的"
-        "華爾街涵蓋券商 Recommendations，使用 Strong Buy 到 Strong Sell 的加權平均評分。"
+        "SEC 13F 為季末持倉申報，最多可能延遲約 45 天；ARKK 是官方每日基金持倉。"
+        "兩者彼此獨立，只供背景參考，不是即時選股訊號，也不形成綜合名次。"
     )
 
     render_sec_holdings()
@@ -459,122 +458,9 @@ def render_analyst_consensus_page() -> None:
     st.markdown("---")
     render_industry_commentary_reference()
     st.markdown("---")
-    _render_curated_consensus()
-    st.markdown("---")
-    st.subheader("🌎 全市場券商 Recommendations")
-    st.caption(
-        "評級權重：Strong Buy = +2、Buy = +1、Hold = 0、Sell = -1、"
-        "Strong Sell = -2。每支標的使用 Yahoo Finance 最新彙總期的全部可用評級。"
-    )
-
-    custom_tickers = st.text_input(
-        "加入要查詢的 Ticker（可用逗號或空格分隔）",
-        placeholder="例如：TSM, ASML, NVO, NVDA",
-        key="consensus_custom_tickers",
-    )
-    extra = tuple(
-        ticker.strip().upper()
-        for ticker in custom_tickers.replace(",", " ").split()
-        if ticker.strip()
-    )
-    tickers = tuple(dict.fromkeys(DEFAULT_RECOMMENDATION_UNIVERSE + extra))
-    st.caption(f"目前查詢 {len(tickers)} 支美股／ADR／ETF；評級資料每小時更新。")
-
-    with st.spinner("正在讀取全市場分析師 Recommendations…"):
-        recommendations_df, loaded_at = fetch_market_recommendations(tickers)
-    st.caption(f"Recommendations 資料載入：{loaded_at}｜分析完成：{beijing_timestamp()}")
-
-    if recommendations_df.empty:
-        st.warning("目前沒有可用的 Recommendations 彙總資料，請稍後重試或加入其他 Ticker。")
-        return
-
-    score_chart = px.bar(
-        recommendations_df.head(15).sort_values("評級加權分數"),
-        x="評級加權分數",
-        y="Ticker",
-        orientation="h",
-        color="評級加權分數",
-        color_continuous_scale="RdYlGn",
-        title="全市場分析師評級加權排行榜",
-        labels={"評級加權分數": "加權平均（-2 到 +2）", "Ticker": ""},
-    )
-    score_chart.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="#0D1117",
-        plot_bgcolor="#0D1117",
-        height=480,
-        margin=dict(l=0, r=10, t=55, b=20),
-        coloraxis_colorbar={"title": "評分"},
-    )
-    st.plotly_chart(score_chart, use_container_width=True)
-
-    upside_df = recommendations_df.dropna(subset=["潛在漲幅 (%)"]).copy()
-    if not upside_df.empty:
-        upside_chart = px.scatter(
-            upside_df,
-            x="評級加權分數",
-            y="潛在漲幅 (%)",
-            text="Ticker",
-            color="加權結論",
-            hover_data=["分析師數", "目標均價", "現價"],
-            title="評級分數與目標價潛在漲幅",
-            labels={
-                "評級加權分數": "評級加權平均",
-                "潛在漲幅 (%)": "潛在漲幅 (%)",
-            },
-            color_discrete_map={
-                "Strong Buy": "#00C853",
-                "Buy": "#7CB342",
-                "Hold": "#F9A825",
-                "Sell": "#FB8C00",
-                "Strong Sell": "#E53935",
-            },
-        )
-        upside_chart.update_traces(textposition="top center")
-        upside_chart.update_layout(
-            template="plotly_dark",
-            paper_bgcolor="#0D1117",
-            plot_bgcolor="#0D1117",
-            height=430,
-            margin=dict(l=0, r=10, t=55, b=20),
-        )
-        st.plotly_chart(upside_chart, use_container_width=True)
-
-    display_columns = [
-        "Ticker",
-        "加權結論",
-        "評級加權分數",
-        "分析師數",
-        "Strong Buy",
-        "Buy",
-        "Hold",
-        "Sell",
-        "Strong Sell",
-        "現價",
-        "目標均價",
-        "潛在漲幅 (%)",
-    ]
-    st.dataframe(
-        recommendations_df[display_columns].style.format(
-            {
-                "評級加權分數": "{:+.3f}",
-                "現價": "${:,.2f}",
-                "目標均價": "${:,.2f}",
-                "潛在漲幅 (%)": "{:+.2f}%",
-            },
-            na_rep="N/A",
-        ),
-        use_container_width=True,
-        hide_index=True,
-    )
-    _render_diagnosis_buttons(
-        recommendations_df["Ticker"].head(12).tolist(),
-        "market_consensus_diag",
-    )
-    st.caption(
-        "⚠️ Yahoo Finance 的 Recommendations 為各標的可取得的券商覆蓋彙總，"
-        "不代表所有華爾街機構的完整名單，也不構成投資建議。"
-    )
+    st.subheader("⭐ 分析師推薦")
+    st.info("此功能開發中，暫不提供。剩餘示範紀錄沒有可查核的原始來源與發言日期，"
+            "因此不展示共識排名、券商彙總排名、論點或 AI 推薦；請勿視為買股依據。")
 
 
 # Compatibility entry point for direct Streamlit page execution.

@@ -122,30 +122,8 @@ def save_kol_whitelist(handles: list) -> None:
 
 
 def add_kol(handle: str) -> tuple:
-    """
-    Validate handle format and add to the whitelist if not already present.
-    Returns (success: bool, message: str).
-    """
-    handle = handle.strip()
-    if not handle:
-        return False, "請輸入帳號名稱。"
-    if not handle.startswith("@"):
-        handle = "@" + handle
-    if len(handle) < 2:
-        return False, "帳號格式錯誤，請包含 @ 符號。"
-    from kol_config import is_ark_identity, is_commentary_identity
-    from sec_edgar_fetcher import MANAGER_IDS
-    if (is_commentary_identity(handle) or is_ark_identity(handle) or
-            handle.lstrip("@").lower().replace(" ", "_") in MANAGER_IDS):
-        return False, "此對象的評論或基金持倉已隔離，不能加入推薦白名單。"
-
-    current = load_kol_whitelist()
-    if handle.lower() in [h.lower() for h in current]:
-        return False, f"{handle} 已在白名單中。"
-
-    current.append(handle)
-    save_kol_whitelist(current)
-    return True, f"✅ {handle} 已加入白名單。"
+    """Without human source verification, custom picks cannot enter a ranking."""
+    return False, "分析師推薦缺乏原始來源人工查證流程，暫不提供新增。"
 
 
 def remove_kol(handle: str) -> None:

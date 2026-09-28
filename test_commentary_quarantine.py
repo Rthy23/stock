@@ -37,8 +37,7 @@ class CommentaryQuarantineTests(unittest.TestCase):
                    pick("warren_buffett", "KO"), pick("howard_marks", "HYG")]
         for whitelist in (ANALYST_DIRECTORY, WHITELIST):
             ranked = build_consensus_table(picks=records, whitelist=whitelist)
-            self.assertEqual([row["ticker"] for row in ranked], ["HYG"])
-            self.assertEqual(ranked[0]["consensus"], 1)
+            self.assertEqual(ranked, [])
         alias = {"id": "@DanIves", "name": "Dan Ives", "rep": 5}
         self.assertEqual(score_picks(picks=[pick("@DanIves")], whitelist=[alias]), [])
 
@@ -49,8 +48,8 @@ class CommentaryQuarantineTests(unittest.TestCase):
                        pick("wsj_markets", "MSFT", True)]
             picks_store.save_picks(records)
             visible = picks_store.get_picks_with_status()
-            self.assertEqual([item["_storage_index"] for item in visible], [2])
-            self.assertEqual([row["ticker"] for row in score_picks()], ["HYG"])
+            self.assertEqual(visible, [])
+            self.assertEqual(score_picks(), [])
             with self.assertRaises(ValueError):
                 picks_store.add_pick(pick("dan_ives"))
             with self.assertRaises(ValueError):
@@ -70,8 +69,7 @@ class CommentaryQuarantineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.object(
                 picks_store, "PICKS_FILE", os.path.join(tmp, "new.json")):
             records = picks_store.load_picks()
-            self.assertFalse({row["kol_id"] for row in records} &
-                             (COMMENTARY_IDS | MANAGER_IDS))
+            self.assertEqual(records, [])
 
     def test_gemini_defensively_skips_untraceable_and_strips_blocked_input(self):
         mixed = {
@@ -85,10 +83,8 @@ class CommentaryQuarantineTests(unittest.TestCase):
             result = call_gemini_consensus([{"ticker": "TSLA", "experts": ["Dan Ives"],
                                              "theses": ["fake"], "consensus": 1},
                                             mixed], "test")
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["experts"], ["Howard Marks"])
-        self.assertEqual(result[0]["consensus"], 1)
-        self.assertNotIn("false statement", ai.call_args.args[0])
+        self.assertEqual(result, [])
+        ai.assert_not_called()
 
     def test_placeholder_lists_names_only(self):
         with patch("kol_whitelist.st") as ui:

@@ -127,7 +127,7 @@ class SecTests(unittest.TestCase):
              "argument_quality": 2, "thesis": "unverified"},
         ]
         ranked = score_picks(picks=picks)
-        self.assertEqual([p["ticker"] for p in ranked], ["MSFT"])
+        self.assertEqual(ranked, [])
 
     def test_existing_manager_records_preserved_but_hidden_and_index_stable(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(picks_store, "PICKS_FILE", os.path.join(tmp, "picks.json")):
@@ -137,15 +137,15 @@ class SecTests(unittest.TestCase):
             ]
             picks_store.save_picks(rows)
             visible = picks_store.get_picks_with_status()
-            self.assertEqual(len(visible), 1)
-            self.assertEqual(visible[0]["_storage_index"], 1)
+            self.assertEqual(visible, [])
             with self.assertRaises(ValueError):
                 picks_store.add_pick(rows[0])
             with self.assertRaises(ValueError):
                 picks_store.update_pick(0, {"thesis": "still fake"})
-            picks_store.delete_pick(visible[0]["_storage_index"])
+            with self.assertRaises(ValueError):
+                picks_store.delete_pick(1)
             with open(picks_store.PICKS_FILE, encoding="utf-8") as fh:
-                self.assertEqual(json.load(fh), rows[:1])
+                self.assertEqual(json.load(fh), rows)
 
     def test_full_fetch_uses_actual_periods_and_sec_links(self):
         class Response:

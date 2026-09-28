@@ -110,16 +110,9 @@ def _write_file(picks: List[Dict]) -> None:
 
 
 def _ensure_initialized() -> None:
-    """首次啟動：若 picks_data.json 不存在，以種子資料初始化。"""
+    """Never seed invented recommendations on a new installation."""
     if not os.path.exists(PICKS_FILE):
-        # Historical seed theses attributed to 13F filers are fictional.
-        # Keep existing user files intact; never seed them on a new install.
-        # C-class entries also need a human-verified statement date and
-        # primary-source URL before reactivation; don't seed fake commentary.
-        seed = [p for p in _build_seed_picks()
-                if p["kol_id"] not in QUARANTINED_IDS
-                and not is_commentary_identity(p["kol_id"]) and not is_ark_identity(p["kol_id"])]
-        _write_file(seed)
+        _write_file([])
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -140,116 +133,25 @@ def save_picks(picks: List[Dict]) -> None:
 
 
 def add_pick(pick: Dict) -> List[Dict]:
-    """
-    新增一筆推薦。必填欄位：kol_id, ticker, date, argument_quality, thesis。
-    回傳更新後的完整列表。
-    """
-    required = {"kol_id", "ticker", "date", "argument_quality", "thesis"}
-    missing = required - set(pick.keys())
-    if missing:
-        raise ValueError(f"缺少必填欄位：{missing}")
-    if pick["kol_id"] in MANAGER_IDS:
-        raise ValueError("13F 申報機構不可新增人工推薦；請查看 SEC 原始持倉資料。")
-    if is_commentary_identity(pick["kol_id"]):
-        raise ValueError("產業評論參考開發中；須先建立人工查證原始來源與發言日期流程。")
-    if is_ark_identity(pick["kol_id"]):
-        raise ValueError("ARKK 基金持倉不可新增為 Cathie Wood 個人推薦。")
-
-    picks = load_picks()
-    entry = {
-        "kol_id":           str(pick["kol_id"]).strip(),
-        "ticker":           str(pick["ticker"]).strip().upper(),
-        "date":             str(pick["date"]),
-        "argument_quality": int(pick["argument_quality"]),
-        "thesis":           str(pick["thesis"]).strip(),
-        "added_at":         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    picks.append(entry)
-    _write_file(picks)
-    return picks
+    """Only a future human-verified source workflow may reopen this editor."""
+    raise ValueError("分析師推薦缺乏人工查證的原始來源；暫不提供新增。")
 
 
 def delete_pick(index: int) -> List[Dict]:
-    """
-    依索引刪除推薦（0-based）。
-    回傳更新後的完整列表。
-    """
-    picks = load_picks()
-    if index < 0 or index >= len(picks):
-        raise IndexError(f"索引 {index} 超出範圍（共 {len(picks)} 筆）")
-    picks.pop(index)
-    _write_file(picks)
-    return picks
+    """Archived records are preserved, not managed as public recommendations."""
+    raise ValueError("未查核歷史紀錄已隔離，暫不提供刪除。")
 
 
 def update_pick(index: int, updates: Dict) -> List[Dict]:
-    """
-    更新指定索引的推薦欄位。
-    回傳更新後的完整列表。
-    """
-    picks = load_picks()
-    if index < 0 or index >= len(picks):
-        raise IndexError(f"索引 {index} 超出範圍（共 {len(picks)} 筆）")
-    if picks[index].get("kol_id") in MANAGER_IDS or updates.get("kol_id") in MANAGER_IDS:
-        raise ValueError("13F 機構舊紀錄已隔離，不可重新加入推薦。")
-    if is_commentary_identity(picks[index].get("kol_id", "")) or is_commentary_identity(updates.get("kol_id", "")):
-        raise ValueError("產業評論參考開發中；舊紀錄不可重新加入推薦。")
-    if is_ark_identity(picks[index].get("kol_id", "")) or is_ark_identity(updates.get("kol_id", "")):
-        raise ValueError("Cathie Wood 舊示範推薦已隔離，不可重新加入。")
-    picks[index].update(updates)
-    if "ticker" in updates:
-        picks[index]["ticker"] = picks[index]["ticker"].strip().upper()
-    picks[index]["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _write_file(picks)
-    return picks
+    """Archived records cannot be re-attributed without verification."""
+    raise ValueError("分析師推薦缺乏人工查證的原始來源；暫不提供編輯。")
 
 
 def purge_expired_picks(days: int = STALE_DAYS) -> tuple[List[Dict], int]:
-    """
-    移除超過 `days` 天的推薦。
-    回傳 (更新後列表, 移除筆數)。
-    """
-    picks = load_picks()
-    cutoff = datetime.now() - timedelta(days=days)
-    active = []
-    removed = 0
-    for p in picks:
-        if (p.get("kol_id") in QUARANTINED_IDS or
-                is_commentary_identity(p.get("kol_id", "")) or is_ark_identity(p.get("kol_id", ""))):
-            active.append(p)  # Historical records are preserved, not surfaced.
-            continue
-        try:
-            pick_date = datetime.strptime(p["date"], "%Y-%m-%d")
-            if pick_date >= cutoff:
-                active.append(p)
-            else:
-                removed += 1
-        except Exception:
-            active.append(p)   # 無法解析日期的記錄保留
-    _write_file(active)
-    return active, removed
+    """Preserve all archived examples, regardless of their old dates."""
+    return load_picks(), 0
 
 
 def get_picks_with_status(days: int = EXPIRY_DAYS) -> List[Dict]:
-    """
-    回傳所有推薦並加上 `is_expired` 與 `days_old` 欄位，供 UI 顯示用。
-    """
-    picks = load_picks()
-    now = datetime.now()
-    result = []
-    for index, p in enumerate(picks):
-        if (p.get("kol_id") in QUARANTINED_IDS or
-                is_commentary_identity(p.get("kol_id", "")) or is_ark_identity(p.get("kol_id", ""))):
-            continue
-        entry = dict(p)
-        entry["_storage_index"] = index
-        try:
-            pick_date = datetime.strptime(p["date"], "%Y-%m-%d")
-            days_old = (now - pick_date).days
-            entry["days_old"]   = days_old
-            entry["is_expired"] = days_old > days
-        except Exception:
-            entry["days_old"]   = -1
-            entry["is_expired"] = False
-        result.append(entry)
-    return result
+    """No archived example is publicly available as a verified pick."""
+    return []

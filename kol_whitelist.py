@@ -370,6 +370,9 @@ def score_picks(
     每筆 pick 分數 = 信譽分(rep/5) × 時效性加權 × 論點品質加權
     同一 ticker 的多筆合計，並記錄推薦專家清單。
     """
+    # No remaining pick has a verified original statement/date/source. Never
+    # calculate a "consensus" from the archived demonstration records.
+    return []
     if picks is None:
         picks = _picks_store.load_picks()
     active_whitelist = whitelist if whitelist is not None else WHITELIST
@@ -448,6 +451,8 @@ def call_gemini_consensus(top_picks: List[Dict], api_key: str) -> List[Dict]:
     回傳 enhanced list (加上 ai_summary / ai_confidence / ai_reason)
     Uses 1-hour cache + exponential-backoff retry on 429/timeout.
     """
+    # No unsourced thesis may be sent to AI or returned as an attributed view.
+    return []
     from gemini_helper import call_gemini_cached, is_quota_error, is_auth_error
 
     results = []
@@ -601,124 +606,16 @@ def render_industry_commentary_reference() -> None:
 
 
 def render_kol_section(api_key: str = "") -> None:
-    """主渲染函數，插入 Macro 頁面的 KOL 區塊。"""
+    """Only official institutional disclosures; no unsourced KOL rankings."""
+    from page_modules.sec_holdings import render_sec_holdings
 
-    st.markdown("### 🧠 精選分析師白名單 (KOL Whitelist)")
-    st.caption("以下目錄只表示關注對象，不代表已查核觀點或目前持倉。下方示範推薦仍未經來源查證。")
-    # ── 合併用戶自定義 KOL ──────────────────────────────────────────────────────
-    _user_handles = load_kol_whitelist()
-    _user_kols: List[Dict] = []
-    for _h in _user_handles:
-        if (is_commentary_identity(_h) or is_ark_identity(_h) or
-                _h.lstrip("@").lower().replace(" ", "_") in MANAGER_IDS):
-            continue
-        _user_kols.append({
-            "id":           _h.lstrip("@").lower().replace(" ", "_"),
-            "name":         _h,
-            "org":          "用戶自定義",
-            "focus":        "（未設定）",
-            "platform":     _h,
-            "stance":       "中性",
-            "stance_color": "#8B949E",
-            "rep":          3,
-            "years_active": 0,
-            "type":         "用戶手動加入",
-            "rationale":    "由用戶透過白名單管理面板手動加入。",
-        })
-    _all_kols: List[Dict] = list(WHITELIST) + _user_kols
-
-    with st.expander(
-        f"📋 展開精選分析師白名單目錄（共 {len(WHITELIST)} 位）",
-        expanded=False,
-    ):
-        render_analyst_directory()
-
-    render_industry_commentary_reference()
+    st.markdown("### 📑 官方基金／機構持倉")
+    render_sec_holdings()
     render_ark_holdings()
-
-    # ── 白名單卡片 ──
-    with st.expander(
-        f"查看白名單評分資料（共 {len(_all_kols)} 位）",
-        expanded=False,
-    ):
-        for kol in _all_kols:
-            star_str = "⭐" * kol["rep"]
-            cols = st.columns([3, 1])
-            with cols[0]:
-                st.markdown(
-                    f"**{kol['name']}** &nbsp;·&nbsp; {kol['org']}  \n"
-                    f"<span style='font-size:12px;color:#8B949E;'>{kol['type']}</span>  \n"
-                    f"**研究方向：** {kol['focus']}  \n"
-                    f"**平台：** {kol['platform']}  \n"
-                    f"**入選理由：** {kol['rationale']}",
-                    unsafe_allow_html=True,
-                )
-            with cols[1]:
-                st.markdown(
-                    f"<div style='text-align:center; background:#1C2128; "
-                    f"border:1px solid #30363D; border-radius:8px; padding:10px;'>"
-                    f"<div style='font-size:11px; color:#8B949E;'>信譽評分</div>"
-                    f"<div style='font-size:16px;'>{star_str}</div>"
-                    f"<div style='font-size:11px; margin-top:4px;'>"
-                    f"<span style='color:{kol['stance_color']}; font-weight:700;'>{kol['stance']}</span>"
-                    f"</div>"
-                    f"<div style='font-size:11px; color:#8B949E;'>活躍 {kol['years_active']}+ 年</div>"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-            st.markdown("---")
-
-    st.markdown("### 📊 白名單共識選股分析")
-    st.error(
-        "⚠️ 以下白名單共識仍使用未查核的示範推薦記錄，並非相關人物或機構"
-        "已核實的公開言論；**請勿作為投資決策依據。** SEC 13F 機構持倉"
-        "另列於分析師共識頁；ARKK 官方基金持倉與產業評論參考"
-        "也都不參與本排行榜。",
-    )
-    st.caption(
-        "觀點一致性加權：多位專家同時推薦 → 分數提升 ｜ "
-        "論點維度驗證：含財報/護城河/估值論述 → 高權重 ｜ "
-        f"時效性加權：7天內=滿分，逾月遞減至 10% ｜ "
-        f"目前依 {len(_all_kols)} 位白名單分析師動態計算"
-    )
-
-    # ── 評分計算 ──
-    ranked = build_consensus_table(whitelist=_all_kols)
-    if not ranked:
-        st.warning("暫無可用的分析師觀點資料。")
-        return
-
-    max_score = ranked[0]["total_score"] if ranked else 1.0
-    top_n     = min(10, len(ranked))
-    top_picks = ranked[:top_n]
-    for p in top_picks:
-        n, s          = _stars(p["total_score"], max_score)
-        p["_star_n"]  = n
-        p["_star_str"] = s
-
-    # ── 共識排行表 (無需 AI) ──
-    _render_consensus_table(top_picks, max_score)
-
-    # ── AI 深度報告 ──
-    st.markdown("#### 🤖 Gemini AI 深度解析")
-    if not api_key:
-        st.info("💡 設定 GEMINI_API_KEY 後可啟用 AI 結構化報告（推薦摘要、信心評分、整合論點）。")
-        return
-
-    btn_col, _ = st.columns([2, 3])
-    with btn_col:
-        run_ai = st.button(
-            "🚀 執行 AI 共識分析（Top 5）",
-            type="primary",
-            use_container_width=True,
-            key="kol_run_ai",
-        )
-
-    if run_ai:
-        with st.spinner("Gemini 正在整合各方觀點並評估信心指數…"):
-            enhanced = call_gemini_consensus(top_picks[:5], api_key)
-        if enhanced:
-            _render_ai_cards(enhanced)
+    st.markdown("### 分析師推薦")
+    st.info("此功能開發中，暫不提供。剩餘四位示範來源缺少可核對的原始連結及發言日期；"
+            "歷史紀錄已隔離，不顯示名次、論點或 AI 摘要。")
+    render_industry_commentary_reference()
 
 
 def _render_consensus_table(picks: List[Dict], max_score: float) -> None:
