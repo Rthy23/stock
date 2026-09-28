@@ -14,7 +14,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-from kol_config import COMMENTARY_IDS, is_commentary_identity
+from kol_config import ARK_FUND_ONLY_IDS, COMMENTARY_IDS, is_ark_identity, is_commentary_identity
 from sec_edgar_fetcher import MANAGER_IDS
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ from sec_edgar_fetcher import MANAGER_IDS
 PICKS_FILE = "picks_data.json"
 EXPIRY_DAYS = 30          # 超過此天數視為過期（score 仍計入 0.1 權重，但可選擇移除）
 STALE_DAYS  = 30          # purge_expired_picks() 的預設閾值
-QUARANTINED_IDS = MANAGER_IDS | COMMENTARY_IDS
+QUARANTINED_IDS = MANAGER_IDS | COMMENTARY_IDS | ARK_FUND_ONLY_IDS
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -117,7 +117,8 @@ def _ensure_initialized() -> None:
         # C-class entries also need a human-verified statement date and
         # primary-source URL before reactivation; don't seed fake commentary.
         seed = [p for p in _build_seed_picks()
-                if p["kol_id"] not in QUARANTINED_IDS and not is_commentary_identity(p["kol_id"])]
+                if p["kol_id"] not in QUARANTINED_IDS
+                and not is_commentary_identity(p["kol_id"]) and not is_ark_identity(p["kol_id"])]
         _write_file(seed)
 
 
@@ -151,6 +152,8 @@ def add_pick(pick: Dict) -> List[Dict]:
         raise ValueError("13F 申報機構不可新增人工推薦；請查看 SEC 原始持倉資料。")
     if is_commentary_identity(pick["kol_id"]):
         raise ValueError("產業評論參考開發中；須先建立人工查證原始來源與發言日期流程。")
+    if is_ark_identity(pick["kol_id"]):
+        raise ValueError("ARKK 基金持倉不可新增為 Cathie Wood 個人推薦。")
 
     picks = load_picks()
     entry = {
@@ -191,6 +194,8 @@ def update_pick(index: int, updates: Dict) -> List[Dict]:
         raise ValueError("13F 機構舊紀錄已隔離，不可重新加入推薦。")
     if is_commentary_identity(picks[index].get("kol_id", "")) or is_commentary_identity(updates.get("kol_id", "")):
         raise ValueError("產業評論參考開發中；舊紀錄不可重新加入推薦。")
+    if is_ark_identity(picks[index].get("kol_id", "")) or is_ark_identity(updates.get("kol_id", "")):
+        raise ValueError("Cathie Wood 舊示範推薦已隔離，不可重新加入。")
     picks[index].update(updates)
     if "ticker" in updates:
         picks[index]["ticker"] = picks[index]["ticker"].strip().upper()
@@ -209,7 +214,8 @@ def purge_expired_picks(days: int = STALE_DAYS) -> tuple[List[Dict], int]:
     active = []
     removed = 0
     for p in picks:
-        if p.get("kol_id") in QUARANTINED_IDS or is_commentary_identity(p.get("kol_id", "")):
+        if (p.get("kol_id") in QUARANTINED_IDS or
+                is_commentary_identity(p.get("kol_id", "")) or is_ark_identity(p.get("kol_id", ""))):
             active.append(p)  # Historical records are preserved, not surfaced.
             continue
         try:
@@ -232,7 +238,8 @@ def get_picks_with_status(days: int = EXPIRY_DAYS) -> List[Dict]:
     now = datetime.now()
     result = []
     for index, p in enumerate(picks):
-        if p.get("kol_id") in QUARANTINED_IDS or is_commentary_identity(p.get("kol_id", "")):
+        if (p.get("kol_id") in QUARANTINED_IDS or
+                is_commentary_identity(p.get("kol_id", "")) or is_ark_identity(p.get("kol_id", ""))):
             continue
         entry = dict(p)
         entry["_storage_index"] = index

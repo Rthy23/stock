@@ -23,6 +23,9 @@ COMMENTARY_IDS: Final[frozenset[str]] = frozenset({
     "blackrock_institute", "morningstar_quant",
 })
 
+# ARKK holdings belong to the ETF, not Cathie Wood's personal recommendations.
+ARK_FUND_ONLY_IDS: Final[frozenset[str]] = frozenset({"cathie_wood"})
+
 
 ANALYST_DIRECTORY: Final[list[dict]] = [
     {
@@ -450,6 +453,12 @@ def is_commentary_identity(value: str) -> bool:
         }:
             identities.add(re.sub(r"[^a-z0-9]", "", person["org"].lower()))
     return normalized in identities
+
+
+def is_ark_identity(value: str) -> bool:
+    """Reject common spellings of Cathie Wood / ARK in user-added KOL handles."""
+    normalized = re.sub(r"[^a-z0-9]", "", str(value).lower())
+    return normalized in {"cathiewood", "arkinvest", "cathiedwood"}
 
 
 STYLE_TAGS: Final[list[str]] = [

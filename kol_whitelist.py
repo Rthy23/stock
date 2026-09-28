@@ -17,8 +17,10 @@ from typing import Dict, List, Tuple
 
 import streamlit as st
 from user_config import load_kol_whitelist
-from kol_config import ANALYST_DIRECTORY, COMMENTARY_IDS, is_commentary_identity
+from kol_config import (ANALYST_DIRECTORY, ARK_FUND_ONLY_IDS, COMMENTARY_IDS,
+                        is_ark_identity, is_commentary_identity)
 from navigation import navigate_to_ticker
+from page_modules.ark_holdings import render_ark_holdings
 import picks_store as _picks_store
 from sec_edgar_fetcher import MANAGER_IDS
 
@@ -134,7 +136,8 @@ WHITELIST: List[Dict] = [
 
 # Keep the historical scoring/picks schema while sourcing the expanded
 # directory from the data-only config module.
-WHITELIST = [a for a in ANALYST_DIRECTORY if a["id"] not in COMMENTARY_IDS | MANAGER_IDS]
+WHITELIST = [a for a in ANALYST_DIRECTORY
+             if a["id"] not in COMMENTARY_IDS | MANAGER_IDS | ARK_FUND_ONLY_IDS]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2. PICKS_DATA — 模擬爬蟲輸出 (可替換為真實 API/爬蟲結果)
@@ -286,7 +289,8 @@ def validate_picks_coverage(
     if directory is None:
         directory = WHITELIST
     if picks is None:
-        picks = [p for p in PICKS_DATA if p["kol_id"] not in COMMENTARY_IDS | MANAGER_IDS]
+        picks = [p for p in PICKS_DATA
+                 if p["kol_id"] not in COMMENTARY_IDS | MANAGER_IDS | ARK_FUND_ONLY_IDS]
 
     dir_ids: set[str]   = {a["id"] for a in directory}
     pick_ids: set[str]  = {p["kol_id"] for p in picks}
@@ -370,13 +374,15 @@ def score_picks(
         picks = _picks_store.load_picks()
     active_whitelist = whitelist if whitelist is not None else WHITELIST
     active_whitelist_map = {k["id"]: k for k in active_whitelist
-                            if not is_commentary_identity(k["id"]) and k["id"] not in MANAGER_IDS}
+                            if not is_commentary_identity(k["id"]) and not is_ark_identity(k["id"])
+                            and k["id"] not in MANAGER_IDS}
 
     ticker_scores: Dict[str, Dict] = {}
     for p in picks:
         # No historical fake pick, even one passed explicitly by another caller,
         # may be ranked or sent onward to the Gemini consensus analysis.
-        if is_commentary_identity(p.get("kol_id", "")) or p.get("kol_id") in MANAGER_IDS:
+        if (is_commentary_identity(p.get("kol_id", "")) or is_ark_identity(p.get("kol_id", ""))
+                or p.get("kol_id") in MANAGER_IDS):
             continue
         kol = active_whitelist_map.get(p["kol_id"])
         if not kol:
@@ -454,7 +460,8 @@ def call_gemini_consensus(top_picks: List[Dict], api_key: str) -> List[Dict]:
         allowed = [
             (pick["experts"][i], pick["theses"][i])
             for i, analyst_id in enumerate(ids)
-            if not is_commentary_identity(analyst_id) and analyst_id not in MANAGER_IDS
+            if not is_commentary_identity(analyst_id) and not is_ark_identity(analyst_id)
+            and analyst_id not in MANAGER_IDS
         ]
         if not allowed:
             continue
@@ -464,7 +471,8 @@ def call_gemini_consensus(top_picks: List[Dict], api_key: str) -> List[Dict]:
             "experts": [name for name, _ in allowed],
             "theses": [thesis for _, thesis in allowed],
             "kol_ids": [analyst_id for analyst_id in ids
-                        if not is_commentary_identity(analyst_id) and analyst_id not in MANAGER_IDS],
+                        if not is_commentary_identity(analyst_id) and not is_ark_identity(analyst_id)
+                        and analyst_id not in MANAGER_IDS],
             "consensus": len(allowed),
         }
         prompt = f"""以下是未經來源查核的示範紀錄，並非相關人物的真實觀點、推薦或持倉。請勿歸因為真實發言，也勿生成投資建議。示範標的 {pick['ticker']}：
@@ -601,7 +609,8 @@ def render_kol_section(api_key: str = "") -> None:
     _user_handles = load_kol_whitelist()
     _user_kols: List[Dict] = []
     for _h in _user_handles:
-        if is_commentary_identity(_h) or _h.lstrip("@").lower().replace(" ", "_") in MANAGER_IDS:
+        if (is_commentary_identity(_h) or is_ark_identity(_h) or
+                _h.lstrip("@").lower().replace(" ", "_") in MANAGER_IDS):
             continue
         _user_kols.append({
             "id":           _h.lstrip("@").lower().replace(" ", "_"),
@@ -625,6 +634,7 @@ def render_kol_section(api_key: str = "") -> None:
         render_analyst_directory()
 
     render_industry_commentary_reference()
+    render_ark_holdings()
 
     # ── 白名單卡片 ──
     with st.expander(
@@ -662,7 +672,8 @@ def render_kol_section(api_key: str = "") -> None:
     st.error(
         "⚠️ 以下白名單共識仍使用未查核的示範推薦記錄，並非相關人物或機構"
         "已核實的公開言論；**請勿作為投資決策依據。** SEC 13F 機構持倉"
-        "另列於分析師共識頁；產業評論參考暫不提供，兩者均不參與本排行榜。",
+        "另列於分析師共識頁；ARKK 官方基金持倉與產業評論參考"
+        "也都不參與本排行榜。",
     )
     st.caption(
         "觀點一致性加權：多位專家同時推薦 → 分數提升 ｜ "

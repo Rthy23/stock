@@ -11,8 +11,9 @@ import streamlit as st
 import yfinance as yf
 
 from data_fetcher import beijing_timestamp
-from kol_config import ANALYST_DIRECTORY, COMMENTARY_IDS
+from kol_config import ANALYST_DIRECTORY, ARK_FUND_ONLY_IDS, COMMENTARY_IDS
 from kol_whitelist import build_consensus_table, render_industry_commentary_reference
+from page_modules.ark_holdings import render_ark_holdings
 from sec_edgar_fetcher import MANAGER_IDS
 from page_modules.sec_holdings import render_sec_holdings
 from navigation import navigate_to_ticker
@@ -217,7 +218,7 @@ def _render_picks_manager() -> None:
         # ── 新增推薦 ──────────────────────────────────────────────────────────
         st.markdown("#### ➕ 新增推薦記錄")
         analyst_options = {a["name"]: a["id"] for a in ANALYST_DIRECTORY
-                           if a["id"] not in MANAGER_IDS | COMMENTARY_IDS}
+                           if a["id"] not in MANAGER_IDS | COMMENTARY_IDS | ARK_FUND_ONLY_IDS}
         col1, col2 = st.columns([2, 1])
         with col1:
             selected_name = st.selectbox(
@@ -393,6 +394,7 @@ def _render_curated_consensus() -> None:
         "⚠️ **模擬資料警告**：以下推薦內容為未查核的示範資料，"
         "並非相關人物或機構真實發表的言論或投資建議。"
         "SEC 13F 機構持倉已另列於上方，**不參與此推薦排名**。"
+        "ARKK 官方基金持倉也獨立展示、不參與排名。"
         "產業評論參考目前暫不提供，亦不參與排名。"
         "**請勿將此排行榜作為投資決策依據。**"
     )
@@ -446,12 +448,14 @@ def _render_curated_consensus() -> None:
 def render_analyst_consensus_page() -> None:
     st.title("🏦 分析師共識與 Recommendations 排行榜")
     st.caption(
-        "SEC 13F 真實機構持倉與下方示範推薦排行榜彼此獨立。"
+        "SEC 13F 季末申報、ARKK 官方每日基金持倉與示範推薦排行彼此獨立。"
         "最下方為 Yahoo Finance 對每支標的所彙整的"
         "華爾街涵蓋券商 Recommendations，使用 Strong Buy 到 Strong Sell 的加權平均評分。"
     )
 
     render_sec_holdings()
+    st.markdown("---")
+    render_ark_holdings()
     st.markdown("---")
     render_industry_commentary_reference()
     st.markdown("---")
