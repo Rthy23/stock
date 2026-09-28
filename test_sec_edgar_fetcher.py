@@ -123,7 +123,7 @@ class SecTests(unittest.TestCase):
         picks = [
             {"kol_id": "warren_buffett", "ticker": "AAPL", "date": "2026-09-28",
              "argument_quality": 3, "thesis": "fictional"},
-            {"kol_id": "adam_khoo", "ticker": "MSFT", "date": "2026-09-28",
+            {"kol_id": "howard_marks", "ticker": "MSFT", "date": "2026-09-28",
              "argument_quality": 2, "thesis": "unverified"},
         ]
         ranked = score_picks(picks=picks)
@@ -133,7 +133,7 @@ class SecTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.object(picks_store, "PICKS_FILE", os.path.join(tmp, "picks.json")):
             rows = [
                 {"kol_id": "warren_buffett", "ticker": "AAPL", "date": "2026-09-28", "argument_quality": 3, "thesis": "fake"},
-                {"kol_id": "adam_khoo", "ticker": "MSFT", "date": "2026-09-28", "argument_quality": 3, "thesis": "demo"},
+                {"kol_id": "howard_marks", "ticker": "MSFT", "date": "2026-09-28", "argument_quality": 3, "thesis": "demo"},
             ]
             picks_store.save_picks(rows)
             visible = picks_store.get_picks_with_status()

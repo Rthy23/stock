@@ -8,7 +8,20 @@ the same directory.
 
 from __future__ import annotations
 
+import re
 from typing import Final
+
+
+# Industry commentary is disabled until a human source-verification workflow
+# records the speaker, actual statement date and required primary-source URL.
+# Never automatically scrape or attribute AI-generated opinions to these names.
+COMMENTARY_IDS: Final[frozenset[str]] = frozenset({
+    "dan_ives", "tom_lee", "gene_munster", "adam_khoo",
+    "joseph_carlson", "liz_ann_sonders", "ed_yardeni",
+    "aswath_damodaran", "wsj_markets", "goldman_global_research",
+    "jpmorgan_global_research", "morgan_stanley_research",
+    "blackrock_institute", "morningstar_quant",
+})
 
 
 ANALYST_DIRECTORY: Final[list[dict]] = [
@@ -418,6 +431,25 @@ ANALYST_DIRECTORY: Final[list[dict]] = [
         "rationale": "以基金、股票與因子評估建立可比較的研究框架。",
     },
 ]
+
+
+def is_commentary_identity(value: str) -> bool:
+    """Match directory IDs, display names and obvious handle spellings."""
+    normalized = re.sub(r"[^a-z0-9]", "", str(value).lower())
+    if not normalized:
+        return False
+    identities = {"wsj"}
+    for person in ANALYST_DIRECTORY:
+        if person["id"] not in COMMENTARY_IDS:
+            continue
+        identities.add(re.sub(r"[^a-z0-9]", "", person["id"].lower()))
+        identities.add(re.sub(r"[^a-z0-9]", "", person["name"].lower()))
+        if person["id"] in {
+            "wsj_markets", "goldman_global_research", "jpmorgan_global_research",
+            "morgan_stanley_research", "blackrock_institute", "morningstar_quant",
+        }:
+            identities.add(re.sub(r"[^a-z0-9]", "", person["org"].lower()))
+    return normalized in identities
 
 
 STYLE_TAGS: Final[list[str]] = [

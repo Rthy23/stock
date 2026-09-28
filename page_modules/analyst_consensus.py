@@ -11,8 +11,8 @@ import streamlit as st
 import yfinance as yf
 
 from data_fetcher import beijing_timestamp
-from kol_config import ANALYST_DIRECTORY
-from kol_whitelist import build_consensus_table
+from kol_config import ANALYST_DIRECTORY, COMMENTARY_IDS
+from kol_whitelist import build_consensus_table, render_industry_commentary_reference
 from sec_edgar_fetcher import MANAGER_IDS
 from page_modules.sec_holdings import render_sec_holdings
 from navigation import navigate_to_ticker
@@ -216,7 +216,8 @@ def _render_picks_manager() -> None:
     with st.expander(expander_label, expanded=False):
         # ── 新增推薦 ──────────────────────────────────────────────────────────
         st.markdown("#### ➕ 新增推薦記錄")
-        analyst_options = {a["name"]: a["id"] for a in ANALYST_DIRECTORY if a["id"] not in MANAGER_IDS}
+        analyst_options = {a["name"]: a["id"] for a in ANALYST_DIRECTORY
+                           if a["id"] not in MANAGER_IDS | COMMENTARY_IDS}
         col1, col2 = st.columns([2, 1])
         with col1:
             selected_name = st.selectbox(
@@ -387,11 +388,12 @@ def _render_picks_manager() -> None:
 
 
 def _render_curated_consensus() -> None:
-    st.subheader("⭐ 精選分析師白名單共識")
+    st.subheader("⭐ 未查核示範資料共識（非持倉）")
     st.error(
         "⚠️ **模擬資料警告**：以下推薦內容為未查核的示範資料，"
         "並非相關人物或機構真實發表的言論或投資建議。"
         "SEC 13F 機構持倉已另列於上方，**不參與此推薦排名**。"
+        "產業評論參考目前暫不提供，亦不參與排名。"
         "**請勿將此排行榜作為投資決策依據。**"
     )
 
@@ -403,7 +405,8 @@ def _render_curated_consensus() -> None:
     st.caption(
         f"目前有 {len(all_picks)} 筆未驗證示範推薦（"
         f"🟢 {fresh_count} 筆有效 / 🔴 {expired_count} 筆過期），"
-        "使用信譽 × 論點品質 × 時效性加權；可透過下方管理介面新增或刪除推薦。"
+        "使用信譽 × 論點品質 × 時效性計算示範分數；"
+        "不代表真實持倉或經來源查核的推薦。"
     )
     ranked = build_consensus_table(whitelist=ANALYST_DIRECTORY)
     if not ranked:
@@ -416,8 +419,8 @@ def _render_curated_consensus() -> None:
             "排名": index,
             "Ticker": pick["ticker"],
             "加權分數": round(float(pick["total_score"]), 3),
-            "推薦專家數": pick["consensus"],
-            "推薦專家": "、".join(dict.fromkeys(pick["experts"])),
+            "未查核紀錄數": pick["consensus"],
+            "示範來源標示": "、".join(dict.fromkeys(pick["experts"])),
         }
         for index, pick in enumerate(ranked, 1)
     ]
@@ -449,6 +452,8 @@ def render_analyst_consensus_page() -> None:
     )
 
     render_sec_holdings()
+    st.markdown("---")
+    render_industry_commentary_reference()
     st.markdown("---")
     _render_curated_consensus()
     st.markdown("---")

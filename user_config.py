@@ -106,7 +106,13 @@ def save_watchlist_cfg(watchlist: list) -> None:
 
 def load_kol_whitelist() -> list:
     """Return list of user-added analyst handles (e.g. ['@handle1', '@handle2'])."""
-    return load_config().get("analyst_whitelist", [])
+    from kol_config import is_commentary_identity
+    from sec_edgar_fetcher import MANAGER_IDS
+    return [
+        handle for handle in load_config().get("analyst_whitelist", [])
+        if not is_commentary_identity(handle)
+        and handle.lstrip("@").lower().replace(" ", "_") not in MANAGER_IDS
+    ]
 
 
 def save_kol_whitelist(handles: list) -> None:
@@ -127,6 +133,10 @@ def add_kol(handle: str) -> tuple:
         handle = "@" + handle
     if len(handle) < 2:
         return False, "帳號格式錯誤，請包含 @ 符號。"
+    from kol_config import is_commentary_identity
+    from sec_edgar_fetcher import MANAGER_IDS
+    if is_commentary_identity(handle) or handle.lstrip("@").lower().replace(" ", "_") in MANAGER_IDS:
+        return False, "此對象的評論或持倉已隔離，不能加入推薦白名單。"
 
     current = load_kol_whitelist()
     if handle.lower() in [h.lower() for h in current]:

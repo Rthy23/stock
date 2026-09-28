@@ -17,7 +17,7 @@ from typing import Dict, List, Tuple
 
 import streamlit as st
 from user_config import load_kol_whitelist
-from kol_config import ANALYST_DIRECTORY
+from kol_config import ANALYST_DIRECTORY, COMMENTARY_IDS, is_commentary_identity
 from navigation import navigate_to_ticker
 import picks_store as _picks_store
 from sec_edgar_fetcher import MANAGER_IDS
@@ -134,7 +134,7 @@ WHITELIST: List[Dict] = [
 
 # Keep the historical scoring/picks schema while sourcing the expanded
 # directory from the data-only config module.
-WHITELIST = ANALYST_DIRECTORY
+WHITELIST = [a for a in ANALYST_DIRECTORY if a["id"] not in COMMENTARY_IDS | MANAGER_IDS]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 2. PICKS_DATA — 模擬爬蟲輸出 (可替換為真實 API/爬蟲結果)
@@ -284,9 +284,9 @@ def validate_picks_coverage(
     import warnings
 
     if directory is None:
-        directory = [a for a in ANALYST_DIRECTORY if a["id"] not in MANAGER_IDS]
+        directory = WHITELIST
     if picks is None:
-        picks = PICKS_DATA
+        picks = [p for p in PICKS_DATA if p["kol_id"] not in COMMENTARY_IDS | MANAGER_IDS]
 
     dir_ids: set[str]   = {a["id"] for a in directory}
     pick_ids: set[str]  = {p["kol_id"] for p in picks}
@@ -369,13 +369,14 @@ def score_picks(
     if picks is None:
         picks = _picks_store.load_picks()
     active_whitelist = whitelist if whitelist is not None else WHITELIST
-    active_whitelist_map = {k["id"]: k for k in active_whitelist}
+    active_whitelist_map = {k["id"]: k for k in active_whitelist
+                            if not is_commentary_identity(k["id"]) and k["id"] not in MANAGER_IDS}
 
     ticker_scores: Dict[str, Dict] = {}
     for p in picks:
         # No historical fake pick, even one passed explicitly by another caller,
         # may be ranked or sent onward to the Gemini consensus analysis.
-        if p.get("kol_id") in MANAGER_IDS:
+        if is_commentary_identity(p.get("kol_id", "")) or p.get("kol_id") in MANAGER_IDS:
             continue
         kol = active_whitelist_map.get(p["kol_id"])
         if not kol:
@@ -392,6 +393,7 @@ def score_picks(
                 "ticker":      t,
                 "total_score": 0.0,
                 "experts":     [],
+                "kol_ids":     [],
                 "theses":      [],
                 "dates":       [],
                 "consensus":   0,
@@ -399,6 +401,7 @@ def score_picks(
         ticker_scores[t]["total_score"] += pick_score
         ticker_scores[t]["consensus"]   += 1
         ticker_scores[t]["experts"].append(kol["name"])
+        ticker_scores[t]["kol_ids"].append(p["kol_id"])
         ticker_scores[t]["theses"].append(p["thesis"])
         ticker_scores[t]["dates"].append(p["date"])
 
@@ -443,15 +446,32 @@ def call_gemini_consensus(top_picks: List[Dict], api_key: str) -> List[Dict]:
 
     results = []
     for pick in top_picks:
-        theses_text = "\n".join(
-            f"- [{pick['experts'][i]}]: {pick['theses'][i]}"
-            for i in range(len(pick["experts"]))
-        )
-        prompt = f"""你是一位量化基本面分析師。以下是來自頂級投資機構與分析師對 {pick['ticker']} 的近期觀點：
+        # Never trust an externally supplied/stale leaderboard: without a
+        # traceable ID for every thesis, don't send it to Gemini at all.
+        ids = pick.get("kol_ids", [])
+        if len(ids) != len(pick.get("experts", [])) or len(ids) != len(pick.get("theses", [])):
+            continue
+        allowed = [
+            (pick["experts"][i], pick["theses"][i])
+            for i, analyst_id in enumerate(ids)
+            if not is_commentary_identity(analyst_id) and analyst_id not in MANAGER_IDS
+        ]
+        if not allowed:
+            continue
+        theses_text = "\n".join(f"- [{name}]: {thesis}" for name, thesis in allowed)
+        safe_pick = {
+            **pick,
+            "experts": [name for name, _ in allowed],
+            "theses": [thesis for _, thesis in allowed],
+            "kol_ids": [analyst_id for analyst_id in ids
+                        if not is_commentary_identity(analyst_id) and analyst_id not in MANAGER_IDS],
+            "consensus": len(allowed),
+        }
+        prompt = f"""以下是未經來源查核的示範紀錄，並非相關人物的真實觀點、推薦或持倉。請勿歸因為真實發言，也勿生成投資建議。示範標的 {pick['ticker']}：
 
 {theses_text}
 
-共有 {pick['consensus']} 位白名單專家推薦此標的（白名單目錄共 {len(WHITELIST)} 位）。
+共有 {len(allowed)} 位未查核示範資料來源標示此標的（目錄共 {len(WHITELIST)} 位；並非可核查推薦）。
 
 請輸出 JSON 格式（只回傳 JSON，不要其他文字）：
 {{
@@ -463,23 +483,23 @@ def call_gemini_consensus(top_picks: List[Dict], api_key: str) -> List[Dict]:
             raw  = call_gemini_cached(prompt, api_key)
             raw  = raw.replace("```json", "").replace("```", "").strip()
             data = json.loads(raw)
-            pick["ai_summary"]    = data.get("summary", "")
-            pick["ai_confidence"] = int(data.get("confidence", 3))
-            pick["ai_reason"]     = data.get("reason", "")
+            safe_pick["ai_summary"]    = data.get("summary", "")
+            safe_pick["ai_confidence"] = int(data.get("confidence", 3))
+            safe_pick["ai_reason"]     = data.get("reason", "")
         except Exception as e:
             if is_quota_error(e):
-                pick["ai_summary"]    = "⏳ AI 配額暫時達上限，請1小時後重試"
-                pick["ai_confidence"] = pick.get("_star_n", 3)
-                pick["ai_reason"]     = "系統將自動於下次刷新後重新生成分析。"
+                safe_pick["ai_summary"]    = "⏳ AI 配額暫時達上限，請1小時後重試"
+                safe_pick["ai_confidence"] = pick.get("_star_n", 3)
+                safe_pick["ai_reason"]     = "系統將自動於下次刷新後重新生成分析。"
             elif is_auth_error(e):
-                pick["ai_summary"]    = "🔑 API Key 錯誤，請更新 Replit Secrets"
-                pick["ai_confidence"] = pick.get("_star_n", 3)
-                pick["ai_reason"]     = "請確認 GEMINI_API_KEY 已正確設定。"
+                safe_pick["ai_summary"]    = "🔑 API Key 錯誤，請更新 Replit Secrets"
+                safe_pick["ai_confidence"] = pick.get("_star_n", 3)
+                safe_pick["ai_reason"]     = "請確認 GEMINI_API_KEY 已正確設定。"
             else:
-                pick["ai_summary"]    = "AI 分析暫時不可用"
-                pick["ai_confidence"] = pick.get("_star_n", 3)
-                pick["ai_reason"]     = f"（錯誤：{e}）"
-        results.append(pick)
+                safe_pick["ai_summary"]    = "AI 分析暫時不可用"
+                safe_pick["ai_confidence"] = pick.get("_star_n", 3)
+                safe_pick["ai_reason"]     = f"（錯誤：{e}）"
+        results.append(safe_pick)
     return results
 
 
@@ -490,7 +510,7 @@ def render_analyst_directory() -> None:
     """Render the searchable, style-filtered 20+ analyst directory."""
     st.markdown("### 🧭 精選美股分析師目錄")
     st.caption(
-        f"共 {len(ANALYST_DIRECTORY)} 位公開研究者與機構。"
+        f"共 {len(WHITELIST)} 位目錄人物與機構。"
         "代表標的是研究主題或公開資料中的代表性標的，不代表即時持倉。"
     )
     search = st.text_input(
@@ -505,7 +525,7 @@ def render_analyst_directory() -> None:
         with tab:
             matches = [
                 analyst
-                for analyst in ANALYST_DIRECTORY
+                for analyst in WHITELIST
                 if (
                     style == "全部" or style in analyst.get("style_tags", [])
                 )
@@ -560,19 +580,29 @@ def render_analyst_directory() -> None:
                 st.markdown("---")
 
 
+def render_industry_commentary_reference() -> None:
+    """Only names are shown until a human source-checking process exists."""
+    st.markdown("### 📰 產業評論參考")
+    st.info("此功能開發中，暫不提供")
+    st.write("、".join(
+        analyst["name"] for analyst in ANALYST_DIRECTORY if analyst["id"] in COMMENTARY_IDS
+    ))
+    # Reopening requires human entry, the actual statement date, a mandatory
+    # verifiable primary-source URL, and manual verification before publication.
+    # Do not use crawlers or AI-generated attributed opinions for this section.
+
+
 def render_kol_section(api_key: str = "") -> None:
     """主渲染函數，插入 Macro 頁面的 KOL 區塊。"""
 
     st.markdown("### 🧠 精選分析師白名單 (KOL Whitelist)")
-    st.caption(
-        "以下為手工篩選的高信譽分析師，須符合：①5年以上活躍記錄、"
-        "②推薦包含結構化論點（非標題黨）、③機構或平台背書。"
-        "觀點一致性、時效性、論點品質三維加權計分。"
-    )
+    st.caption("以下目錄只表示關注對象，不代表已查核觀點或目前持倉。下方示範推薦仍未經來源查證。")
     # ── 合併用戶自定義 KOL ──────────────────────────────────────────────────────
     _user_handles = load_kol_whitelist()
     _user_kols: List[Dict] = []
     for _h in _user_handles:
+        if is_commentary_identity(_h) or _h.lstrip("@").lower().replace(" ", "_") in MANAGER_IDS:
+            continue
         _user_kols.append({
             "id":           _h.lstrip("@").lower().replace(" ", "_"),
             "name":         _h,
@@ -593,6 +623,8 @@ def render_kol_section(api_key: str = "") -> None:
         expanded=False,
     ):
         render_analyst_directory()
+
+    render_industry_commentary_reference()
 
     # ── 白名單卡片 ──
     with st.expander(
@@ -630,7 +662,7 @@ def render_kol_section(api_key: str = "") -> None:
     st.error(
         "⚠️ 以下白名單共識仍使用未查核的示範推薦記錄，並非相關人物或機構"
         "已核實的公開言論；**請勿作為投資決策依據。** SEC 13F 機構持倉"
-        "另列於分析師共識頁，不參與本排行榜。",
+        "另列於分析師共識頁；產業評論參考暫不提供，兩者均不參與本排行榜。",
     )
     st.caption(
         "觀點一致性加權：多位專家同時推薦 → 分數提升 ｜ "
@@ -680,13 +712,13 @@ def render_kol_section(api_key: str = "") -> None:
 
 def _render_consensus_table(picks: List[Dict], max_score: float) -> None:
     """渲染共識排行榜（靜態，無 Gemini）"""
-    st.markdown("#### 🏆 白名單共識排行榜（評分加權）")
+    st.markdown("#### 🏆 未查核示範紀錄排名（非持倉／非推薦）")
 
     header_html = """
     <div style='display:grid; grid-template-columns:60px 1fr 120px 80px 90px;
                 gap:8px; background:#21262D; border-radius:6px;
                 padding:8px 12px; font-weight:700; font-size:13px; margin-bottom:4px; color:#E6EDF3;'>
-      <div>#</div><div>標的</div><div>推薦專家</div><div>一致性</div><div>信心</div>
+      <div>#</div><div>標的</div><div>示範來源</div><div>紀錄數</div><div>示範分數</div>
     </div>"""
     st.markdown(header_html, unsafe_allow_html=True)
 
@@ -710,7 +742,7 @@ def _render_consensus_table(picks: List[Dict], max_score: float) -> None:
             </div>
           </div>
           <div style='font-size:11px; color:#8B949E;'>{experts_str[:30]}{"…" if len(experts_str)>30 else ""}</div>
-          <div style='text-align:center; font-weight:700;'>{consensus} 位</div>
+          <div style='text-align:center; font-weight:700;'>{consensus} 筆</div>
           <div style='text-align:center;'>{star_str}</div>
         </div>"""
         st.markdown(row_html, unsafe_allow_html=True)
@@ -720,7 +752,7 @@ def _render_consensus_table(picks: List[Dict], max_score: float) -> None:
     # 展開詳細論點
     with st.expander("📝 查看各標的詳細論點", expanded=False):
         for p in picks:
-            st.markdown(f"**{p['ticker']}** — 共 {p['consensus']} 位專家推薦")
+            st.markdown(f"**{p['ticker']}** — 共 {p['consensus']} 筆未查核示範紀錄")
             for j, (expert, thesis, date) in enumerate(
                 zip(p["experts"], p["theses"], p["dates"])
             ):
@@ -752,13 +784,13 @@ def _render_ai_cards(enhanced: List[Dict]) -> None:
                     padding:14px 18px; margin-bottom:12px;'>
           <div style='display:flex; justify-content:space-between; align-items:center;'>
             <b style='font-size:18px; color:{title_col};'>{p['ticker']}</b>
-            <div style='font-size:16px;'>{conf_star} <span style='font-size:12px;color:#8B949E;'>信心 {conf}/5</span></div>
+             <div style='font-size:16px;'>{conf_star} <span style='font-size:12px;color:#8B949E;'>AI 示範分數 {conf}/5</span></div>
           </div>
           <div style='font-size:13px; font-weight:600; color:#E6EDF3; margin:8px 0 4px;'>📌 {summary}</div>
           <div style='font-size:12px; color:#8B949E; margin-bottom:8px;'>{reason}</div>
           <div style='display:flex; gap:16px; font-size:12px; color:#8B949E;'>
-            <span>👥 一致性：<b style='color:#E6EDF3;'>{consensus} 位</b>白名單專家推薦</span>
-            <span>🧑‍💼 包含：{experts}</span>
+             <span>👥 未查核示範紀錄：<b style='color:#E6EDF3;'>{consensus} 筆</b></span>
+             <span>🧑‍💼 示範標示：{experts}</span>
           </div>
         </div>"""
         st.markdown(card_html, unsafe_allow_html=True)
