@@ -20,6 +20,7 @@ from user_config import load_kol_whitelist
 from kol_config import ANALYST_DIRECTORY
 from navigation import navigate_to_ticker
 import picks_store as _picks_store
+from sec_edgar_fetcher import MANAGER_IDS
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 1. WHITELIST — 手工篩選高信譽分析師
@@ -164,11 +165,6 @@ PICKS_DATA: List[Dict] = [
     {"kol_id": "jeremy_siegel",   "ticker": "VIG",  "date": (_today - timedelta(days=5)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "股息成長股歷史風險調整後報酬優秀，防禦性佳"},
     {"kol_id": "jeremy_siegel",   "ticker": "SPY",  "date": (_today - timedelta(days=12)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "歷史數據：S&P500 長期年化 7% 實質報酬不變，持有就是策略"},
 
-    # Michael Burry
-    {"kol_id": "michael_burry",   "ticker": "SQQQ", "date": (_today - timedelta(days=3)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "科技股 P/E 過高，利率維持高位，做空 QQQ 作為組合避險"},
-    {"kol_id": "michael_burry",   "ticker": "GEO",  "date": (_today - timedelta(days=9)).strftime("%Y-%m-%d"),  "argument_quality": 2, "thesis": "低估值監獄營運商，政策逆風已反映股價"},
-    {"kol_id": "michael_burry",   "ticker": "SHV",  "date": (_today - timedelta(days=3)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "6個月短債持有到期，規避市場系統性風險"},
-
     # Joseph Carlson
     {"kol_id": "joseph_carlson",  "ticker": "MSFT", "date": (_today - timedelta(days=2)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "核心持倉，自由現金流 year over year 成長 25%+，AI Copilot 訂閱收入加速"},
     {"kol_id": "joseph_carlson",  "ticker": "AAPL", "date": (_today - timedelta(days=2)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "服務收入佔比提升至 25%，毛利率擴張，持續回購股票"},
@@ -187,45 +183,10 @@ PICKS_DATA: List[Dict] = [
     {"kol_id": "wsj_markets",     "ticker": "GOOGL","date": (_today - timedelta(days=4)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "報導：Gemini 整合 Workspace 後廣告 CTR 提升，廣告主預算回流"},
     {"kol_id": "wsj_markets",     "ticker": "META", "date": (_today - timedelta(days=4)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "報導：Llama AI 模型開源策略吸引企業用戶，廣告算法精準度再提升"},
 
-    # Warren Buffett
-    {"kol_id": "warren_buffett",  "ticker": "AAPL", "date": (_today - timedelta(days=5)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "蘋果是消費者行為最佳護城河之一，服務收入持續成長，現金回購力道強勁"},
-    {"kol_id": "warren_buffett",  "ticker": "KO",   "date": (_today - timedelta(days=10)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "定價權穩固，全球分銷網絡無可複製，股息增長超過 60 年"},
-    {"kol_id": "warren_buffett",  "ticker": "BRK-B","date": (_today - timedelta(days=14)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "多元業務組合提供穩定現金流，帳面保守低槓桿，長期複利機器"},
-
     # Charlie Munger
     {"kol_id": "charlie_munger",  "ticker": "COST", "date": (_today - timedelta(days=6)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "會員制商業模式黏性極強，倉儲零售護城河可持續複利增長"},
     {"kol_id": "charlie_munger",  "ticker": "AAPL", "date": (_today - timedelta(days=9)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "品質企業應長期持有，蘋果生態系統鎖定效應為最佳商業模式範本"},
     {"kol_id": "charlie_munger",  "ticker": "BRK-B","date": (_today - timedelta(days=20)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "避免愚蠢決策勝過追求聰明操作，持有優質資產等待時間複利"},
-
-    # Stanley Druckenmiller
-    {"kol_id": "stanley_druckenmiller", "ticker": "NVDA", "date": (_today - timedelta(days=2)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "AI 算力需求正處於史上最大資本支出週期，流動性驅動動能顯著"},
-    {"kol_id": "stanley_druckenmiller", "ticker": "MSFT", "date": (_today - timedelta(days=7)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "企業雲端與 AI 整合加速，Azure 收入週期確定性高，值得集中高確信"},
-    {"kol_id": "stanley_druckenmiller", "ticker": "QQQ",  "date": (_today - timedelta(days=12)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "科技龍頭盈利動能與流動性環境共振，趨勢跟隨策略持有科技 ETF"},
-
-    # David Tepper
-    {"kol_id": "david_tepper",    "ticker": "AMZN", "date": (_today - timedelta(days=3)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "AWS 與廣告雙引擎驅動自由現金流爆發，政策寬鬆環境利好估值修復"},
-    {"kol_id": "david_tepper",    "ticker": "META", "date": (_today - timedelta(days=5)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "AI 廣告精準化提升 ARPU，宏觀消費回暖利好廣告支出週期"},
-    {"kol_id": "david_tepper",    "ticker": "QQQ",  "date": (_today - timedelta(days=11)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "聯準會政策轉向訊號明確，流動性驅動科技股估值擴張"},
-
-    # Bill Ackman
-    {"kol_id": "bill_ackman",     "ticker": "CMG",  "date": (_today - timedelta(days=4)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "品牌定價權強，同店銷售穩健，數位點餐滲透率持續提升"},
-    {"kol_id": "bill_ackman",     "ticker": "HLT",  "date": (_today - timedelta(days=8)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "輕資產加盟模式現金流穩定，旅遊復甦長期趨勢支撐入住率"},
-    {"kol_id": "bill_ackman",     "ticker": "GOOG", "date": (_today - timedelta(days=13)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "搜索廣告護城河穩固，雲端業務加速，AI 整合提升貨幣化效率"},
-
-    # Seth Klarman
-    {"kol_id": "seth_klarman",    "ticker": "GOOG", "date": (_today - timedelta(days=7)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "估值相對科技同業具備安全邊際，廣告業務現金流充足支撐下行保護"},
-    {"kol_id": "seth_klarman",    "ticker": "EBAY", "date": (_today - timedelta(days=15)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "市場忽視的二手電商平台，估值偏低，自由現金流持續回購支撐"},
-    {"kol_id": "seth_klarman",    "ticker": "WBD",  "date": (_today - timedelta(days=20)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "困境資產估值已大幅折讓，串流整合進展超預期可帶來困境反轉"},
-
-    # Joel Greenblatt
-    {"kol_id": "joel_greenblatt", "ticker": "SPY",  "date": (_today - timedelta(days=6)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "Magic Formula 篩選後，S&P500 整體盈利殖利率仍具吸引力"},
-    {"kol_id": "joel_greenblatt", "ticker": "VTV",  "date": (_today - timedelta(days=10)).strftime("%Y-%m-%d"), "argument_quality": 3, "thesis": "價值因子輪動訊號浮現，高資本回報率 + 低估值的組合歷史表現優異"},
-    {"kol_id": "joel_greenblatt", "ticker": "GILD", "date": (_today - timedelta(days=18)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "生技股盈利殖利率偏高，研發管線具備上行期權，符合 Magic Formula 篩選"},
-
-    # Mohnish Pabrai
-    {"kol_id": "mohnish_pabrai",  "ticker": "GOOG", "date": (_today - timedelta(days=5)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "複製 Buffett 邏輯：護城河深、現金流豐沛，長期複利特質明顯"},
-    {"kol_id": "mohnish_pabrai",  "ticker": "MU",   "date": (_today - timedelta(days=9)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "記憶體週期底部已過，HBM AI 需求爆發，勝率高且下行有限"},
-    {"kol_id": "mohnish_pabrai",  "ticker": "AMR",  "date": (_today - timedelta(days=17)).strftime("%Y-%m-%d"), "argument_quality": 2, "thesis": "冶金煤供應緊縮，鋼鐵產業鏈需求穩定，低估值高確信反向佈局"},
 
     # Aswath Damodaran
     {"kol_id": "aswath_damodaran","ticker": "AAPL", "date": (_today - timedelta(days=4)).strftime("%Y-%m-%d"),  "argument_quality": 3, "thesis": "DCF 模型顯示服務業務成長支撐合理估值，風險溢價已充分反映"},
@@ -323,7 +284,7 @@ def validate_picks_coverage(
     import warnings
 
     if directory is None:
-        directory = ANALYST_DIRECTORY
+        directory = [a for a in ANALYST_DIRECTORY if a["id"] not in MANAGER_IDS]
     if picks is None:
         picks = PICKS_DATA
 
@@ -412,6 +373,10 @@ def score_picks(
 
     ticker_scores: Dict[str, Dict] = {}
     for p in picks:
+        # No historical fake pick, even one passed explicitly by another caller,
+        # may be ranked or sent onward to the Gemini consensus analysis.
+        if p.get("kol_id") in MANAGER_IDS:
+            continue
         kol = active_whitelist_map.get(p["kol_id"])
         if not kol:
             continue
@@ -662,6 +627,11 @@ def render_kol_section(api_key: str = "") -> None:
             st.markdown("---")
 
     st.markdown("### 📊 白名單共識選股分析")
+    st.error(
+        "⚠️ 以下白名單共識仍使用未查核的示範推薦記錄，並非相關人物或機構"
+        "已核實的公開言論；**請勿作為投資決策依據。** SEC 13F 機構持倉"
+        "另列於分析師共識頁，不參與本排行榜。",
+    )
     st.caption(
         "觀點一致性加權：多位專家同時推薦 → 分數提升 ｜ "
         "論點維度驗證：含財報/護城河/估值論述 → 高權重 ｜ "
@@ -704,12 +674,6 @@ def render_kol_section(api_key: str = "") -> None:
     if run_ai:
         with st.spinner("Gemini 正在整合各方觀點並評估信心指數…"):
             enhanced = call_gemini_consensus(top_picks[:5], api_key)
-        st.session_state["kol_ai_result"] = enhanced
-        st.session_state["kol_ai_done"]   = True
-        st.rerun()
-
-    if st.session_state.get("kol_ai_done"):
-        enhanced = st.session_state.get("kol_ai_result", [])
         if enhanced:
             _render_ai_cards(enhanced)
 

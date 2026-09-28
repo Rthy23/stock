@@ -13,6 +13,8 @@ import yfinance as yf
 from data_fetcher import beijing_timestamp
 from kol_config import ANALYST_DIRECTORY
 from kol_whitelist import build_consensus_table
+from sec_edgar_fetcher import MANAGER_IDS
+from page_modules.sec_holdings import render_sec_holdings
 from navigation import navigate_to_ticker
 import picks_store
 
@@ -214,7 +216,7 @@ def _render_picks_manager() -> None:
     with st.expander(expander_label, expanded=False):
         # ── 新增推薦 ──────────────────────────────────────────────────────────
         st.markdown("#### ➕ 新增推薦記錄")
-        analyst_options = {a["name"]: a["id"] for a in ANALYST_DIRECTORY}
+        analyst_options = {a["name"]: a["id"] for a in ANALYST_DIRECTORY if a["id"] not in MANAGER_IDS}
         col1, col2 = st.columns([2, 1])
         with col1:
             selected_name = st.selectbox(
@@ -313,7 +315,7 @@ def _render_picks_manager() -> None:
 
         def _render_pick_rows(picks_subset: list, offset: int) -> None:
             for local_i, p in enumerate(picks_subset):
-                real_idx = offset + local_i
+                real_idx = p["_storage_index"]
                 analyst_name = id_to_name.get(p["kol_id"], p["kol_id"])
                 badge = _freshness_badge(p.get("days_old", -1))
                 quality_icons = {3: "💪", 2: "📊", 1: "⚠️"}
@@ -332,7 +334,7 @@ def _render_picks_manager() -> None:
 
         with tab_active:
             active_with_idx = [
-                (i, p) for i, p in enumerate(all_picks) if not p.get("is_expired")
+                (p["_storage_index"], p) for p in all_picks if not p.get("is_expired")
             ]
             if active_with_idx:
                 st.markdown(
@@ -360,7 +362,7 @@ def _render_picks_manager() -> None:
 
         with tab_expired:
             expired_with_idx = [
-                (i, p) for i, p in enumerate(all_picks) if p.get("is_expired")
+                (p["_storage_index"], p) for p in all_picks if p.get("is_expired")
             ]
             if expired_with_idx:
                 st.caption("以下推薦超過 30 天，在共識計算中權重已降至 ×0.1。")
@@ -386,6 +388,12 @@ def _render_picks_manager() -> None:
 
 def _render_curated_consensus() -> None:
     st.subheader("⭐ 精選分析師白名單共識")
+    st.error(
+        "⚠️ **模擬資料警告**：以下推薦內容為未查核的示範資料，"
+        "並非相關人物或機構真實發表的言論或投資建議。"
+        "SEC 13F 機構持倉已另列於上方，**不參與此推薦排名**。"
+        "**請勿將此排行榜作為投資決策依據。**"
+    )
 
     # Load picks freshness summary for the caption
     all_picks = picks_store.get_picks_with_status()
@@ -393,7 +401,7 @@ def _render_curated_consensus() -> None:
     fresh_count = len(all_picks) - expired_count
 
     st.caption(
-        f"目前依 {len(ANALYST_DIRECTORY)} 位精選分析師的推薦（共 {len(all_picks)} 筆，"
+        f"目前有 {len(all_picks)} 筆未驗證示範推薦（"
         f"🟢 {fresh_count} 筆有效 / 🔴 {expired_count} 筆過期），"
         "使用信譽 × 論點品質 × 時效性加權；可透過下方管理介面新增或刪除推薦。"
     )
@@ -416,20 +424,6 @@ def _render_curated_consensus() -> None:
     top_rows = all_rows[:15]
     rest_rows = all_rows[15:]
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # ⚠️  SIMULATED DATA WARNING — must remain visible until a real data source
-    #     (e.g. live 13F filings, verified news feed) is wired in.
-    #     Do NOT remove this block; see PICKS_DATA comment in kol_whitelist.py.
-    # ──────────────────────────────────────────────────────────────────────────
-    st.error(
-        "⚠️ **模擬資料警告**：目前顯示的推薦內容為**示範用途的模擬資料**，"
-        "並非上述任何人物或機構真實發表過的言論或投資建議。"
-        "在功能正式串接真實資料源（如 SEC 13F 申報、公開新聞爬蟲）之前，"
-        "**請勿將此處內容作為任何投資決策依據。**",
-        icon=None,
-    )
-    # ──────────────────────────────────────────────────────────────────────────
-
     curated_df = pd.DataFrame(top_rows)
     st.dataframe(curated_df, use_container_width=True, hide_index=True)
 
@@ -449,10 +443,13 @@ def _render_curated_consensus() -> None:
 def render_analyst_consensus_page() -> None:
     st.title("🏦 分析師共識與 Recommendations 排行榜")
     st.caption(
-        "上方為精選分析師白名單共識；下方為 Yahoo Finance 對每支標的所彙整的"
+        "SEC 13F 真實機構持倉與下方示範推薦排行榜彼此獨立。"
+        "最下方為 Yahoo Finance 對每支標的所彙整的"
         "華爾街涵蓋券商 Recommendations，使用 Strong Buy 到 Strong Sell 的加權平均評分。"
     )
 
+    render_sec_holdings()
+    st.markdown("---")
     _render_curated_consensus()
     st.markdown("---")
     st.subheader("🌎 全市場券商 Recommendations")

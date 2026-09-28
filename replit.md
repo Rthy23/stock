@@ -43,6 +43,22 @@ A Streamlit-based US stock screening and trading dashboard with technical analys
 streamlit run app.py --server.port 5000
 ```
 
+## SEC 13F institutional holdings
+
+The analyst consensus page has an independent SEC 13F panel. Set `SEC_USER_AGENT`
+in Replit Secrets to a real application name followed by a reachable contact email
+(e.g. `MyStockApp owner@your-domain.com`) before fetching SEC filings; no example
+address is used by the application. It is sent in the HTTP User-Agent to the SEC.
+If unset or if SEC data fails validation, the panel reports unavailable and never
+substitutes the old simulated analyst picks. The old picks remain on disk for
+non-destructive migration, but the eight 13F managers are excluded from recommendation
+ranking, pick management, and AI consensus input. The separate remaining example
+recommendations retain a prominent simulated-data warning.
+
+The SEC panel shows institution-level quarter-end long positions only. It checks
+filer names at runtime, caches data for one day, and does not infer ticker symbols
+from CUSIPs or equate holdings with a manager's advice or current trades.
+
 ## 權重調整紀錄（2026-08-16）
 
 ### 七因子 Composite Score 權重調整

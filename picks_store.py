@@ -14,6 +14,7 @@ import json
 import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+from sec_edgar_fetcher import MANAGER_IDS
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 常數
@@ -52,10 +53,6 @@ def _build_seed_picks() -> List[Dict]:
         {"kol_id": "jeremy_siegel", "ticker": "VT",  "date": d(5),  "argument_quality": 3, "thesis": "全球分散配置，長期複利效應超越擇時操作"},
         {"kol_id": "jeremy_siegel", "ticker": "VIG", "date": d(5),  "argument_quality": 3, "thesis": "股息成長股歷史風險調整後報酬優秀，防禦性佳"},
         {"kol_id": "jeremy_siegel", "ticker": "SPY", "date": d(12), "argument_quality": 3, "thesis": "歷史數據：S&P500 長期年化 7% 實質報酬不變，持有就是策略"},
-        # Michael Burry
-        {"kol_id": "michael_burry", "ticker": "SQQQ","date": d(3),  "argument_quality": 3, "thesis": "科技股 P/E 過高，利率維持高位，做空 QQQ 作為組合避險"},
-        {"kol_id": "michael_burry", "ticker": "GEO", "date": d(9),  "argument_quality": 2, "thesis": "低估值監獄營運商，政策逆風已反映股價"},
-        {"kol_id": "michael_burry", "ticker": "SHV", "date": d(3),  "argument_quality": 3, "thesis": "6個月短債持有到期，規避市場系統性風險"},
         # Joseph Carlson
         {"kol_id": "joseph_carlson", "ticker": "MSFT","date": d(2), "argument_quality": 3, "thesis": "核心持倉，自由現金流 YoY 成長 25%+，AI Copilot 訂閱收入加速"},
         {"kol_id": "joseph_carlson", "ticker": "AAPL","date": d(2), "argument_quality": 3, "thesis": "服務收入佔比提升至 25%，毛利率擴張，持續回購股票"},
@@ -71,33 +68,10 @@ def _build_seed_picks() -> List[Dict]:
         {"kol_id": "wsj_markets", "ticker": "MSFT",  "date": d(1), "argument_quality": 3, "thesis": "報導：企業 AI 軟體採用進入主流，Copilot 付費席次季增 40%"},
         {"kol_id": "wsj_markets", "ticker": "GOOGL", "date": d(4), "argument_quality": 3, "thesis": "報導：Gemini 整合 Workspace 後廣告 CTR 提升，廣告主預算回流"},
         {"kol_id": "wsj_markets", "ticker": "META",  "date": d(4), "argument_quality": 3, "thesis": "報導：Llama AI 模型開源策略吸引企業用戶，廣告算法精準度再提升"},
-        # Warren Buffett
-        {"kol_id": "warren_buffett", "ticker": "AAPL", "date": d(5),  "argument_quality": 3, "thesis": "蘋果是消費者行為最佳護城河之一，服務收入持續成長，現金回購力道強勁"},
-        {"kol_id": "warren_buffett", "ticker": "KO",   "date": d(10), "argument_quality": 3, "thesis": "定價權穩固，全球分銷網絡無可複製，股息增長超過 60 年"},
-        {"kol_id": "warren_buffett", "ticker": "BRK-B","date": d(14), "argument_quality": 3, "thesis": "多元業務組合提供穩定現金流，帳面保守低槓桿，長期複利機器"},
         # Charlie Munger
         {"kol_id": "charlie_munger", "ticker": "COST", "date": d(6),  "argument_quality": 3, "thesis": "會員制商業模式黏性極強，倉儲零售護城河可持續複利增長"},
         {"kol_id": "charlie_munger", "ticker": "AAPL", "date": d(9),  "argument_quality": 3, "thesis": "品質企業應長期持有，蘋果生態系統鎖定效應為最佳商業模式範本"},
         {"kol_id": "charlie_munger", "ticker": "BRK-B","date": d(20), "argument_quality": 3, "thesis": "避免愚蠢決策勝過追求聰明操作，持有優質資產等待時間複利"},
-        # Stanley Druckenmiller
-        {"kol_id": "stanley_druckenmiller", "ticker": "NVDA", "date": d(2),  "argument_quality": 3, "thesis": "AI 算力需求正處於史上最大資本支出週期，流動性驅動動能顯著"},
-        {"kol_id": "stanley_druckenmiller", "ticker": "MSFT", "date": d(7),  "argument_quality": 3, "thesis": "企業雲端與 AI 整合加速，Azure 收入週期確定性高，值得集中高確信"},
-        {"kol_id": "stanley_druckenmiller", "ticker": "QQQ",  "date": d(12), "argument_quality": 3, "thesis": "科技龍頭盈利動能與流動性環境共振，趨勢跟隨策略持有科技 ETF"},
-        # David Tepper
-        {"kol_id": "david_tepper", "ticker": "AMZN", "date": d(3),  "argument_quality": 3, "thesis": "AWS 與廣告雙引擎驅動自由現金流爆發，政策寬鬆環境利好估值修復"},
-        {"kol_id": "david_tepper", "ticker": "META", "date": d(5),  "argument_quality": 3, "thesis": "AI 廣告精準化提升 ARPU，宏觀消費回暖利好廣告支出週期"},
-        {"kol_id": "david_tepper", "ticker": "QQQ",  "date": d(11), "argument_quality": 2, "thesis": "聯準會政策轉向訊號明確，流動性驅動科技股估值擴張"},
-        # Bill Ackman
-        {"kol_id": "bill_ackman", "ticker": "CMG",  "date": d(4),  "argument_quality": 3, "thesis": "品牌定價權強，同店銷售穩健，數位點餐滲透率持續提升"},
-        {"kol_id": "bill_ackman", "ticker": "HLT",  "date": d(8),  "argument_quality": 3, "thesis": "輕資產加盟模式現金流穩定，旅遊復甦長期趨勢支撐入住率"},
-        {"kol_id": "bill_ackman", "ticker": "GOOG", "date": d(13), "argument_quality": 3, "thesis": "搜索廣告護城河穩固，雲端業務加速，AI 整合提升貨幣化效率"},
-        # Seth Klarman
-        {"kol_id": "seth_klarman", "ticker": "GOOG",  "date": d(7),  "argument_quality": 3, "thesis": "估值相對科技同業具備安全邊際，廣告業務現金流充足支撐下行保護"},
-        {"kol_id": "seth_klarman", "ticker": "EBAY",  "date": d(20), "argument_quality": 2, "thesis": "低估值平台業務，廣告變現尚未完全定價，自由現金流穩定"},
-        {"kol_id": "seth_klarman", "ticker": "WBD",   "date": d(25), "argument_quality": 2, "thesis": "串流整合陣痛期已過，內容資產帳面值顯著低於重置成本"},
-        # Joel Greenblatt
-        {"kol_id": "joel_greenblatt", "ticker": "GILD","date": d(4), "argument_quality": 3, "thesis": "Magic Formula: 高資本回報率 + 低盈利殖利率，生技低估值機會"},
-        {"kol_id": "joel_greenblatt", "ticker": "VTV", "date": d(8), "argument_quality": 3, "thesis": "價值因子週期回歸，VTV 持倉以高ROE傳統企業為主，估值安全邊際充足"},
         # Tom Lee
         {"kol_id": "tom_lee", "ticker": "SPY",  "date": d(3), "argument_quality": 3, "thesis": "市場廣度回升，新高家數擴散，S&P500 年底目標上調"},
         {"kol_id": "tom_lee", "ticker": "NVDA", "date": d(6), "argument_quality": 3, "thesis": "AI 超級週期下 Nvidia 為科技股多頭核心持倉"},
@@ -136,7 +110,9 @@ def _write_file(picks: List[Dict]) -> None:
 def _ensure_initialized() -> None:
     """首次啟動：若 picks_data.json 不存在，以種子資料初始化。"""
     if not os.path.exists(PICKS_FILE):
-        seed = _build_seed_picks()
+        # Historical seed theses attributed to 13F filers are fictional.
+        # Keep existing user files intact; never seed them on a new install.
+        seed = [p for p in _build_seed_picks() if p["kol_id"] not in MANAGER_IDS]
         _write_file(seed)
 
 
@@ -166,6 +142,8 @@ def add_pick(pick: Dict) -> List[Dict]:
     missing = required - set(pick.keys())
     if missing:
         raise ValueError(f"缺少必填欄位：{missing}")
+    if pick["kol_id"] in MANAGER_IDS:
+        raise ValueError("13F 申報機構不可新增人工推薦；請查看 SEC 原始持倉資料。")
 
     picks = load_picks()
     entry = {
@@ -202,6 +180,8 @@ def update_pick(index: int, updates: Dict) -> List[Dict]:
     picks = load_picks()
     if index < 0 or index >= len(picks):
         raise IndexError(f"索引 {index} 超出範圍（共 {len(picks)} 筆）")
+    if picks[index].get("kol_id") in MANAGER_IDS or updates.get("kol_id") in MANAGER_IDS:
+        raise ValueError("13F 機構舊紀錄已隔離，不可重新加入推薦。")
     picks[index].update(updates)
     if "ticker" in updates:
         picks[index]["ticker"] = picks[index]["ticker"].strip().upper()
@@ -220,6 +200,9 @@ def purge_expired_picks(days: int = STALE_DAYS) -> tuple[List[Dict], int]:
     active = []
     removed = 0
     for p in picks:
+        if p.get("kol_id") in MANAGER_IDS:
+            active.append(p)  # Historical records are preserved, not surfaced.
+            continue
         try:
             pick_date = datetime.strptime(p["date"], "%Y-%m-%d")
             if pick_date >= cutoff:
@@ -239,8 +222,11 @@ def get_picks_with_status(days: int = EXPIRY_DAYS) -> List[Dict]:
     picks = load_picks()
     now = datetime.now()
     result = []
-    for p in picks:
+    for index, p in enumerate(picks):
+        if p.get("kol_id") in MANAGER_IDS:
+            continue
         entry = dict(p)
+        entry["_storage_index"] = index
         try:
             pick_date = datetime.strptime(p["date"], "%Y-%m-%d")
             days_old = (now - pick_date).days
