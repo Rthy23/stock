@@ -1,0 +1,102 @@
+任務目標：把 kol_whitelist.py 裡 PICKS_DATA 的模�擬資料，
+針對「有公開申報義務」的機構/基金經理人，改成串接真實資料源；
+其餘沒有結構化資料可查的人物，保留現有紅色警語，
+且該部分名單另外做視覺區隔。
+
+═══════════════════════════════════════
+任務 1：串接 SEC EDGAR 13F 資料（適用 Buffett、Ackman、Burry、
+Klarman、Tepper、Druckenmiller、Pabrai、Greenblatt 等基金經理人）
+═══════════════════════════════════════
+背景知識：
+- 美國證券法規定，管理超過1億美元的機構投資人，每季必須向 SEC
+  申報 Form 13F，公開揭露美股持倉（但只揭露多頭持股，不含放空、
+  且有最長 45 天的申報延遲，所以看到的資料永遠是「上一季末」的
+  持倉，不是即時動態）
+- SEC EDGAR 提供免費公開 API，不需要 API Key，但每個請求都必須
+  帶上 User-Agent header 標明聯絡資訊（SEC 有明文規定，
+  否則會被封鎖），例如：
+      headers = {"User-Agent": "YourAppName contact@example.com"}
+- 每個機構在 EDGAR 都有一個 CIK（機構識別碼），可以先手動查好
+  這幾家機構的 CIK，寫死在設定檔裡（CIK 本身是固定的，不會變）：
+      Berkshire Hathaway (Buffett): CIK 0001067983
+      Pershing Square (Ackman): CIK 0001336528
+      Scion Asset Management (Burry): CIK 0001649339
+      Baupost Group (Klarman): CIK 0001061768
+      Appaloosa Management (Tepper): CIK 0001656456
+      Duquesne Family Office (Druckenmiller): CIK 0001536411
+      Pabrai Investment Funds: CIK 0001173334
+      Gotham Asset Management (Greenblatt): CIK 0001512466
+  （這些 CIK 請在實作前自行到 https://www.sec.gov/cgi-bin/browse-edgar
+  重新核對一次是否正確，name-CIK 對應偶爾會因公司改名或合併變動）
+
+實作步驟：
+1. 新增一個 sec_edgar_fetcher.py，用 requests 呼叫
+   https://data.sec.gov/submissions/CIK{cik}.json 拿到該機構
+   最新一次 13F-HR 申報的 accession number
+2. 再抓該申報底下的 information table XML（通常路徑類似
+   https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/），
+   解析出當季持股明細（股票代碼、股數、市值）
+3. 跟上一季申報結果比對，算出「新增持股」「加碼」「減碼」
+   「出清」四種變化，這比單純列出持股更有參考價值
+4. 加上快取（例如 st.cache_data(ttl=86400)，一天更新一次即可，
+   反正 13F 本來就是季度資料，不需要頻繁抓取）
+5. 在 UI 上這部分清楚標示：「資料來源：SEC 13F 申報，
+   反映上一季末（{實際日期}）持倉，非即時動態，
+   且申報義務只涵蓋多頭部位」
+
+═══════════════════════════════════════
+任務 2：串接 ARK Invest 每日持倉 CSV（適用 Cathie Wood）
+═══════════════════════════════════════
+ARK Invest 每個交易日會公開更新旗下 ETF（ARKK、ARKW、ARKG 等）
+的完整持倉 CSV，網址格式類似：
+https://ark-funds.com/wp-content/fundsiteliterature/csv/ARK_INNOVATION_ETF_ARKK_HOLDINGS.csv
+（請先手動打開這個網址確認目前是否仍有效、格式是否有變動，
+ARK 官網結構偶爾會調整）
+
+實作步驟：
+1. 每日抓取一次這個 CSV，跟前一日比對，算出當日買賣變化
+2. 一樣加上快取，一天抓一次即可
+3. UI 標示：「資料來源：ARK Invest 官方每日持倉揭露」
+
+═══════════════════════════════════════
+任務 3：C類人物（無結構化資料來源）— 改成人工整理 + 來源連結模式
+═══════════════════════════════════════
+Dan Ives、Tom Lee、Gene Munster、Adam Khoo、Joseph Carlson、
+Liz Ann Sonders、Ed Yardeni、Damodaran、WSJ、Goldman/JPM/MS/
+BlackRock/Morningstar 研究部門，這些沒有申報義務，也沒有
+公開結構化 API，請不要嘗試用爬蟲自動生成他們的「論述」或「觀點」
+——上次的模擬資料問題就是出在這裡，自動化爬蟲摘要很容易誤判
+或過度簡化，掛在真人名字下風險很高。
+
+建議改法：
+1. 把這個名單獨立成「產業評論參考」區塊，跟上面 A/B 類
+   「真實持倉資料」在 UI 上明確分開，不要混在同一個排行榜裡
+   一起打分數、一起排名。
+2. 每一筆內容如果要保留，必須附上「原始來源連結」
+   （例如該分析師公開受訪的 YouTube 影片連結、公開報告連結），
+   且內容欄位改成人工登打、附上該則發言的實際日期，
+   不要讓程式自動生成或摘要成一句話論述。
+3. 如果現階段沒有人力維護這塊，最簡單也最誠實的做法是：
+   直接把這個區塊隱藏或標示「此功能開發中，暫不提供」，
+   等真的有維護機制再上線，好過用不準確的內容誤導使用者。
+
+═══════════════════════════════════════
+共通注意事項
+═══════════════════════════════════════
+- SEC EDGAR 有速率限制（建議每秒不超過 10 次請求），
+  且務必帶正確的 User-Agent，否則會被暫時封鎖
+- 13F 資料本質上是「落後指標」（最長45天延遲、且只反映
+  申報當下的一個時間點），UI 上務必讓使用者清楚知道這一點，
+  不要包裝成「即時動態」
+- 完成 A、B 類真實資料串接後，PICKS_DATA 裡對應這幾個人的
+  模擬資料要整批移除，不要新舊資料混著顯示
+- 任務3的部分如果選擇隱藏，請保留程式碼註解說明未來若要
+  重新上線，必須先建立人工來源查證流程
+
+完成後請告訴我：
+1. A、B 類（8個基金經理人 + ARK）是否成功抓到真實 13F/持倉資料，
+   最新一筆資料的實際申報日期是多久之前
+2. C 類的處理方式選了哪個（人工整理+來源連結 / 暫時隱藏）
+3. UI 上「模擬資料」的紅色警語，是不是只保留在還沒真實化的
+   部分，已經真實化的 A/B 類不應該再顯示這個警語
+   （改成顯示真實資料來源說明）
