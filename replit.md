@@ -78,6 +78,29 @@ valid CUSIP/share fields. If the database or source fails, show the problem,
 not fabricated holdings or a local-file fallback. The first published visit
 cannot retroactively reconstruct missing historic days.
 
+## Market-data integrity and refresh
+
+Keep the Streamlit architecture and free data sources; do not require a paid
+API key. Route quotes/fundamentals/history through the replaceable provider
+contract in `market_data.py`. Quote cache is 60 seconds, fundamentals/history
+15 minutes. Live quote times must come from the source, never receipt/render
+times; if `fast_info` has no source timestamp, show unknown. Missing values
+remain None and must not appear as zero or synthetic neutral sentiment.
+
+Historical analysis/backtests use adjusted OHLC/close and the shared Wilder
+RSI implementation. Actual regular/pre/post execution quotes remain unadjusted
+and separated: adjusting a live trade price would misrepresent the market.
+NYSE calendar controls automatic quote requests, including holidays and early
+closes. A small status/countdown fragment continues to run outside market hours,
+but does not periodically request quotes. S&P 500 scans preserve source/coverage
+and only refresh displayed quotes, not automatically rescan the whole index.
+Financial period labels based on Yahoo's mostRecentQuarter are explicitly
+approximate per-field attribution, not independently verified SEC periods.
+
+Verification: `python -m unittest discover -p 'test_*.py'`; Streamlit interaction
+tests live alongside provider/clock/indicator fixtures. Do not publish fixtures
+or copy development ARK snapshot data to production.
+
 ## 權重調整紀錄（2026-08-16）
 
 ### 七因子 Composite Score 權重調整

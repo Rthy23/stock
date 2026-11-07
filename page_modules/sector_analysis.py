@@ -99,7 +99,7 @@ def _close_frame(downloaded: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
     )
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_sector_performance(period: str = "1y") -> tuple[pd.DataFrame, float | None, str]:
     """Fetch sector ETF and SPY prices for *period* and compute total return.
 
@@ -111,7 +111,7 @@ def fetch_sector_performance(period: str = "1y") -> tuple[pd.DataFrame, float | 
     dl_kwargs = _yf_period_params(period)
     downloaded = yf.download(
         tickers=tickers,
-        auto_adjust=False,
+        auto_adjust=True,
         progress=False,
         threads=False,
         group_by="column",
@@ -155,7 +155,7 @@ def render_sector_analysis_page() -> None:
     st.title("📊 美股熱門行業板塊分析")
     st.caption(
         "追蹤 11 大 S&P 500 板塊 ETF，從 1M／3M／1Y 報酬率觀察資金輪動。"
-        " 價格資料每小時更新一次。"
+        " adjusted 價格資料採 15 分鐘快取；開頁時檢查，不是每分鐘即時行情。"
     )
 
     selected_label = st.radio(
@@ -175,7 +175,7 @@ def render_sector_analysis_page() -> None:
         st.info("可稍後重新整理；Yahoo Finance 暫時限流時不會寫入錯誤快取。")
         return
 
-    st.caption(f"⏱ 板塊資料載入：{loaded_at}｜分析完成：{beijing_timestamp()}")
+    st.caption(f"⏱ 板塊取得／快取回傳時間（非行情來源時間）：{loaded_at}｜分析完成：{beijing_timestamp()}")
 
     metric_col = "報酬率 (%)"
     sorted_df = perf_df.sort_values(metric_col, ascending=False).reset_index(drop=True)

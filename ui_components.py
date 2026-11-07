@@ -7,6 +7,8 @@ import plotly.express as px
 import pandas as pd
 import yfinance as yf
 import json
+from market_data import get_quote, quote_volume_ratio, market_status
+from market_ui import fmt as market_fmt, quote_label
 from datetime import datetime
 
 from analysis import (
@@ -50,7 +52,7 @@ def _render_external_timing(
 ) -> None:
     """Show consistent Beijing-time checkpoints for externally fetched data."""
     st.caption(
-        f"⏱ {label}資料載入：{loaded_at}｜"
+        f"⏱ {label}取得／快取回傳時間（非來源時間）：{loaded_at}｜"
         f"分析完成：{analyzed_at or beijing_timestamp()}"
     )
 
@@ -274,9 +276,14 @@ def plot_volume_chart(ticker: str, hist: pd.DataFrame) -> tuple:
         colors = ["#00D4FF" if c >= o else "#FF4B4B"
                   for c, o in zip(hist["Close"], hist["Open"])]
         last_vol = float(hist["Volume"].iloc[-1])
-        last_avg = float(avg20.iloc[-1]) if not pd.isna(avg20.iloc[-1]) else last_vol
-        vol_ratio       = last_vol / last_avg if last_avg > 0 else 1.0
-        is_institutional = vol_ratio >= 2.0
+        today = market_status()["now"].date()
+        complete = hist.loc[[stamp.date() < today for stamp in hist.index]]
+        last_avg = float(complete["Volume"].tail(20).mean()) if len(complete) >= 20 else None
+        try:
+            vol_ratio = quote_volume_ratio(get_quote(ticker), last_avg)
+        except Exception:
+            vol_ratio = None
+        is_institutional = vol_ratio is not None and vol_ratio >= 2.
 
         fig = go.Figure()
         fig.add_trace(go.Bar(
@@ -288,8 +295,7 @@ def plot_volume_chart(ticker: str, hist: pd.DataFrame) -> tuple:
             line=dict(color="#FFD700", width=1.8, dash="dash"),
             hovertemplate="20日均量：%{y:,.0f}<extra></extra>",
         ))
-        flag_text  = (f"⚠️ 今日量 {vol_ratio:.1f}× 均量<br>機構級資金活動"
-                      if is_institutional else f"今日量 {vol_ratio:.1f}× 均量")
+        flag_text = f"同時段量比 {market_fmt(vol_ratio)}×（時間比例近似）"
         flag_color = "#FF4B4B" if is_institutional else "#FFD700"
         fig.add_annotation(
             x=hist.index[-1], y=last_vol, text=flag_text,
@@ -868,33 +874,29 @@ def render_portfolio_dashboard() -> None:
     rows       = []
     fetch_errs = []
     tickers    = list(portfolio.keys())
-    with st.spinner(f"正在更新 {len(tickers)} 支股票的即時報價…"):
+    with st.spinner(f"正在取得 {len(tickers)} 支股票報價（60 秒快取）…"):
         for t, pos in portfolio.items():
             buy_price = pos.get("buy_price", 0)
             qty       = pos.get("qty", 0)
-            cur_price = 0
+            cur_price = None
+            quote = None
             name      = t
             try:
-                info      = yf.Ticker(t).fast_info
-                cur_price = getattr(info, "last_price", None) or 0
-                if not cur_price:
-                    full_info = yf.Ticker(t).info
-                    cur_price = (full_info.get("regularMarketPrice")
-                                 or full_info.get("currentPrice") or 0)
-                    name = full_info.get("shortName", t)
+                quote = get_quote(t)
+                cur_price = quote["regular"]["price"]
             except Exception as _fe:
                 fetch_errs.append(f"{t}（{_fe}）")
             cost_value = buy_price * qty
-            cur_value  = cur_price * qty
-            pnl        = cur_value - cost_value
-            ret_pct    = (pnl / cost_value * 100) if cost_value > 0 else 0
+            cur_value = cur_price * qty if cur_price is not None else None
+            pnl = cur_value - cost_value if cur_value is not None else None
+            ret_pct = (pnl / cost_value * 100) if pnl is not None and cost_value > 0 else None
             rows.append({
                 "ticker": t, "name": name,
                 "buy_price": buy_price, "qty": qty,
                 "cur_price": cur_price,
                 "cost_value": cost_value, "cur_value": cur_value,
                 "pnl": pnl, "ret_pct": ret_pct,
-                "price_ok": cur_price > 0,
+                "price_ok": cur_price is not None, "quote": quote,
             })
     _portfolio_loaded_at = beijing_timestamp()
     if fetch_errs:
@@ -903,9 +905,9 @@ def render_portfolio_dashboard() -> None:
         )
 
     total_cost = sum(r["cost_value"] for r in rows)
-    total_cur  = sum(r["cur_value"]  for r in rows)
-    total_pnl  = total_cur - total_cost
-    total_ret  = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+    total_cur = sum(r["cur_value"] for r in rows) if all(r["price_ok"] for r in rows) else None
+    total_pnl = total_cur - total_cost if total_cur is not None else None
+    total_ret = total_pnl / total_cost * 100 if total_pnl is not None and total_cost > 0 else None
     _portfolio_analysis_at = beijing_timestamp()
     _render_external_timing(
         "持倉報價", _portfolio_loaded_at, _portfolio_analysis_at
@@ -914,10 +916,10 @@ def render_portfolio_dashboard() -> None:
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("持倉股票數",  f"{len(rows)} 支")
     s2.metric("總投入成本",  fmt_usd_hkd(total_cost))
-    s3.metric("目前總市值",  fmt_usd_hkd(total_cur))
-    pnl_str = (f"+{fmt_usd_hkd(total_pnl)}" if total_pnl >= 0
+    s3.metric("目前總市值", fmt_usd_hkd(total_cur) if total_cur is not None else "資料不足")
+    pnl_str = ("資料不足" if total_pnl is None else f"+{fmt_usd_hkd(total_pnl)}" if total_pnl >= 0
                else f"-{fmt_usd_hkd(abs(total_pnl))}")
-    s4.metric("總盈虧 (P&L)", pnl_str, delta=f"{total_ret:+.2f}%")
+    s4.metric("總盈虧 (P&L)", pnl_str, delta=f"{total_ret:+.2f}%" if total_ret is not None else None)
 
     st.markdown("---")
     st.markdown("### 📋 持倉明細")
@@ -936,7 +938,9 @@ def render_portfolio_dashboard() -> None:
     for r in rows:
         rp      = r["ret_pct"]
         rate    = _get_rate()
-        if rp <= -10:
+        if rp is None:
+            row_bg, alert_label, ret_col = "", "資料不足：不計算此持倉盈虧", "#8B949E"
+        elif rp <= -10:
             row_bg      = ("background:rgba(255,75,75,0.12); border-left:3px solid #FF4B4B;"
                            " border-radius:4px; padding:4px 6px; margin-bottom:4px;")
             alert_label = "⚠️ 虧損超過 10%！"
@@ -959,13 +963,15 @@ def render_portfolio_dashboard() -> None:
                 unsafe_allow_html=True,
             )
 
-        ret_sym     = f"+{rp:.2f}%" if rp >= 0 else f"{rp:.2f}%"
+        ret_sym = "資料不足" if rp is None else f"+{rp:.2f}%" if rp >= 0 else f"{rp:.2f}%"
         pnl_usd     = r["pnl"]
-        pnl_hkd     = pnl_usd * rate
-        pnl_usd_str = (f"+${pnl_usd:,.2f} USD" if pnl_usd >= 0
+        pnl_hkd = pnl_usd * rate if pnl_usd is not None else None
+        pnl_usd_str = ("資料不足" if pnl_usd is None else f"+${pnl_usd:,.2f} USD" if pnl_usd >= 0
                        else f"-${abs(pnl_usd):,.2f} USD")
-        pnl_hkd_str = (f"+${pnl_hkd:,.1f} HKD" if pnl_hkd >= 0
+        pnl_hkd_str = ("資料不足" if pnl_hkd is None else f"+${pnl_hkd:,.1f} HKD" if pnl_hkd >= 0
                        else f"-${abs(pnl_hkd):,.1f} HKD")
+        st.caption(f"{r['ticker']} regular：{market_fmt(r['cur_price'])} · "
+                   f"{quote_label(r['quote']) if r['quote'] else '資料不足'}")
 
         rcols = st.columns(col_w)
         if rcols[0].button(f"**{r['ticker']}**", key=f"pf_goto_{r['ticker']}",
@@ -1062,12 +1068,12 @@ def render_opportunity_banner() -> None:
                 continue
             range52 = high52 - low52
             if range52 > 0 and (price - low52) / range52 <= 0.35:
-                opportunities.append((t, price, t in portfolio))
+                opportunities.append((t, price, t in portfolio, info.get("quote")))
         if not opportunities:
             return
         parts = "　　".join(
-            f"🟢 <b>{t}</b> ${p:.2f}{'  💼' if in_pf else ''}"
-            for t, p, in_pf in opportunities
+            f"🟢 <b>{t}</b> ${p:.2f}{'  💼' if in_pf else ''} · {quote_label(q)}"
+            for t, p, in_pf, q in opportunities
         )
         st.markdown(
             f"""<div style="background:linear-gradient(90deg,#0A2010,#0D2E18);
@@ -1099,7 +1105,7 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
             with hdr_r:
                 st.markdown(
                     "<div style='text-align:right; color:#666; font-size:13px; "
-                    "padding-top:10px;'>StockTwits 60% ＋ 新聞 40%｜每 10 分鐘更新</div>",
+                    "padding-top:10px;'>StockTwits 60% ＋ 新聞 40%｜15 分鐘快取，開頁時檢查</div>",
                     unsafe_allow_html=True,
                 )
 
@@ -1107,16 +1113,17 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                 try:
                     sentiment = get_combined_sentiment("SPY")
                 except Exception:
-                    sentiment = {"combined": 50.0, "news_score": 50.0,
-                                 "social_score": 50.0,
-                                 "social_data": {"bull_count": 0, "bear_count": 0, "total": 0}}
+                    sentiment = {"combined": None, "news_score": None,
+                                 "social_score": None,
+                                 "social_data": {"bull_count": None, "bear_count": None, "total": None}}
             _sentiment_loaded_at = beijing_timestamp()
 
             combined     = sentiment["combined"]
             news_score   = sentiment["news_score"]
             social_score = sentiment["social_score"]
             sd           = sentiment["social_data"]
-            _check_sentiment_mutation("SPY", social_score)
+            if social_score is not None:
+                _check_sentiment_mutation("SPY", social_score)
             _sentiment_analysis_at = beijing_timestamp()
             _render_external_timing(
                 "市場情緒", _sentiment_loaded_at, _sentiment_analysis_at
@@ -1189,23 +1196,23 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                     f"<div style='background:#1C2128; border:1px solid #30363D; border-radius:7px; padding:10px 12px; font-size:12px;'>"
                     f"<div style='display:flex; justify-content:space-between; padding:3px 0;'>"
                     f"  <span style='color:#8B949E;'>📰 新聞（40%）</span>"
-                    f"  <span style='color:{col_n}; font-weight:700;'>{news_score:.0f} ({label_n})</span></div>"
+                    f"  <span style='color:{col_n}; font-weight:700;'>{news_score if news_score is not None else '無數據'} ({label_n})</span></div>"
                     f"<div style='display:flex; justify-content:space-between; padding:3px 0;'>"
                     f"  <span style='color:#8B949E;'>💬 社交（60%）</span>"
-                    f"  <span style='color:{col_s}; font-weight:700;'>{social_score:.0f} ({label_s})</span></div>"
+                    f"  <span style='color:{col_s}; font-weight:700;'>{social_score if social_score is not None else '無數據'} ({label_s})</span></div>"
                     f"<hr style='border-color:#30363D; margin:5px 0;'>"
                     f"<div style='display:flex; justify-content:space-between; padding:2px 0;'>"
                     f"  <span style='font-weight:600; color:#E6EDF3;'>🎯 綜合</span>"
-                    f"  <span style='color:{col_c}; font-weight:800; font-size:15px;'>{combined:.0f} ({label_c})</span></div>"
+                    f"  <span style='color:{col_c}; font-weight:800; font-size:15px;'>{combined if combined is not None else '無數據'} ({label_c})</span></div>"
                     f"<hr style='border-color:#30363D; margin:5px 0;'>"
                     f"<div style='font-size:13px; color:#8B949E;'>"
-                    f"🟢 看多 {sd.get('bull_count',0)}&nbsp;&nbsp;"
-                    f"🔴 看空 {sd.get('bear_count',0)}&nbsp;&nbsp;"
-                    f"共 {sd.get('total',0)} 則</div>"
+                    f"🟢 看多 {sd.get('bull_count') if sd.get('bull_count') is not None else '無數據'}&nbsp;&nbsp;"
+                    f"🔴 看空 {sd.get('bear_count') if sd.get('bear_count') is not None else '無數據'}&nbsp;&nbsp;"
+                    f"共 {sd.get('total') if sd.get('total') is not None else '無數據'} 則</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-                if sd.get("total", 0) < 10:
+                if (sd.get("total") or 0) < 10:
                     st.caption(
                         f"⚠️ 社交情緒樣本數過少（{sd.get('total',0)} 則），"
                         "當前分數僅供參考，數據量不足以反映真實市場情緒。"

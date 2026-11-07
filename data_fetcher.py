@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from analysis import classify_sentiment
 from user_config import load_watchlist_cfg, save_watchlist_cfg
+from market_data import get_quote, get_fundamentals, get_history
 
 _MODULE = "data_fetcher"
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
@@ -443,64 +444,21 @@ def parse_ibkr_screenshot(image_bytes: bytes, mime_type: str = "image/png") -> t
 
 
 # ── Stock data fetching ────────────────────────────────────────────────────────
-@st.cache_data(ttl=900)
 def _fetch_stock_info_cached(ticker: str) -> dict:
-    """Cached inner fetch.  Raises on failure so st.cache_data never stores
-    a bad result — only successful dicts are cached for 15 minutes."""
-    stock = yf.Ticker(ticker)
-    info  = stock.info or {}
-
-    # yfinance returns a 1-key {"trailingPegRatio": None} dict for unknown
-    # tickers, but may also return a sparse dict with a few keys for valid
-    # tickers during off-hours.  Use fast_info as the authoritative liveness
-    # check: if we can get a price there the ticker is real even if .info is
-    # sparse.
-    fi = stock.fast_info  # lightweight, always available for listed tickers
-
-    _price = (
-        info.get("currentPrice")
-        or info.get("regularMarketPrice")
-        or 0
-    )
-    if not _price:
-        try:
-            _price = float(fi.last_price or 0)
-        except Exception:
-            _price = 0
-
-    # A ticker is invalid only when both info and fast_info give us nothing.
-    _has_name  = bool(info.get("longName") or info.get("shortName") or info.get("symbol"))
-    _has_price = bool(_price)
-    _has_quote = bool(info.get("quoteType") or info.get("regularMarketPrice")
-                      or info.get("currentPrice"))
-    if not (_has_name or _has_price or _has_quote):
-        raise ValueError(f"No data found for ticker '{ticker}'")
-
-    # 52-week range: prefer info, fall back to fast_info attributes.
-    _52h = info.get("fiftyTwoWeekHigh", 0) or 0
-    _52l = info.get("fiftyTwoWeekLow",  0) or 0
-    if not _52h:
-        try:
-            _52h = float(getattr(fi, "year_high", 0) or 0)
-            _52l = float(getattr(fi, "year_low",  0) or 0)
-        except Exception:
-            pass
-
-    return {
-        "ticker":          ticker,
-        "name":            info.get("longName") or info.get("shortName") or ticker,
-        "sector":          info.get("sector", "N/A"),
-        "market_cap":      info.get("marketCap", 0) or 0,
-        "net_margin":      info.get("profitMargins", 0) or 0,
-        "pe_ratio":        info.get("trailingPE", 0) or 0,
-        "revenue_growth":  info.get("revenueGrowth", 0) or 0,
-        "price":           _price,
-        "52w_high":        _52h,
-        "52w_low":         _52l,
-        "dividend_yield":  info.get("dividendYield", 0) or 0,
-        "eps":             info.get("trailingEps", 0) or 0,
-        "beta":            info.get("beta", 0) or 0,
-    }
+    """Fundamentals 15 min; quotes 60 sec. No default numerical values."""
+    try:
+        facts = get_fundamentals(ticker)
+    except Exception as exc:
+        facts = dict.fromkeys(("market_cap", "net_margin", "pe_ratio", "forward_pe",
+                               "revenue_growth", "52w_high", "52w_low", "dividend_yield", "eps", "beta"))
+        facts.update(ticker=ticker, name=ticker, sector="資料不足",
+                     fundamental_error=str(exc), margin_period="財報期間資料不足",
+                     growth_period="財報期間資料不足", eps_period="財報期間資料不足")
+    try:
+        quote = get_quote(ticker)
+    except Exception as exc:
+        return {**facts, "price": None, "quote": None, "quote_error": str(exc)}
+    return {**facts, "price": quote["regular"]["price"], "quote": quote}
 
 
 def get_stock_info(ticker: str) -> dict | None:
@@ -512,18 +470,22 @@ def get_stock_info(ticker: str) -> dict | None:
         return None
 
 
-@st.cache_data(ttl=900)
 def get_factor_data(ticker: str) -> dict:
     """
     Fetch all additional financial metrics needed for 7-Factor analysis.
     Returns a flat dict of raw metric values; None for unavailable fields.
-    Cached for 10 minutes to reduce redundant yfinance calls.
+    Cached for 15 minutes; missing values remain None.
     """
     try:
-        info = yf.Ticker(ticker).info
+        facts = get_fundamentals(ticker)
+        info = facts["raw"]
         def _f(key, default=None):
             v = info.get(key, default)
-            return v if v is not None and v != 0 else default
+            return v if v is not None else default
+
+        def pct(key):
+            value = _f(key)
+            return value * 100 if value is not None else None
 
         return {
             # Value
@@ -531,31 +493,32 @@ def get_factor_data(ticker: str) -> dict:
             "pb_ratio":          _f("priceToBook"),
             "ev_ebitda":         _f("enterpriseToEbitda"),
             "ps_ratio":          _f("priceToSalesTrailing12Months"),
-            "dividend_yield":    (_f("dividendYield") or 0) * 100,  # convert to %
+            "dividend_yield":    _f("dividendYield"),
             # Quality
-            "roe":               (_f("returnOnEquity") or 0) * 100,
-            "roa":               (_f("returnOnAssets") or 0) * 100,
-            "gross_margin":      (_f("grossMargins") or 0) * 100,
-            "op_margin":         (_f("operatingMargins") or 0) * 100,
-            "net_margin":        (_f("profitMargins") or 0) * 100,
+            "roe":               pct("returnOnEquity"),
+            "roa":               pct("returnOnAssets"),
+            "gross_margin":      pct("grossMargins"),
+            "op_margin":         pct("operatingMargins"),
+            "net_margin":        pct("profitMargins"),
             "debt_equity":       _f("debtToEquity"),
             "current_ratio":     _f("currentRatio"),
             # Growth
-            "rev_growth":        (_f("revenueGrowth") or 0) * 100,
-            "eps_growth":        (_f("earningsGrowth") or 0) * 100,
+            "rev_growth":        pct("revenueGrowth"),
+            "eps_growth":        pct("earningsGrowth"),
             "fwd_eps":           _f("forwardEps"),
             "trailing_eps":      _f("trailingEps"),
             # Volatility
             "beta":              _f("beta"),
             # Sentiment
             "short_ratio":       _f("shortRatio"),        # days to cover
-            "short_pct":         (_f("shortPercentOfFloat") or 0) * 100,
-            "inst_ownership":    (_f("heldPercentInstitutions") or 0) * 100,
-            "insider_ownership": (_f("heldPercentInsiders") or 0) * 100,
+            "short_pct":         pct("shortPercentOfFloat"),
+            "inst_ownership":    pct("heldPercentInstitutions"),
+            "insider_ownership": pct("heldPercentInsiders"),
             "rec_mean":          _f("recommendationMean"),  # 1=Strong Buy … 5=Sell
-            "num_analysts":      _f("numberOfAnalystOpinions", 0),
+            "num_analysts":      _f("numberOfAnalystOpinions"),
+            "financial_period": facts["financial_period"],
             "target_mean":       _f("targetMeanPrice"),
-            "price":             _f("currentPrice") or _f("regularMarketPrice"),
+            "price":             None,  # Factor calculations use adjusted history, not stale info prices.
             # Extra
             "sector":            info.get("sector", "N/A"),
             "industry":          info.get("industry", "N/A"),
@@ -573,7 +536,7 @@ def get_historical_data(ticker: str, period: str = "1y") -> pd.DataFrame | None:
     """
     try:
         params = _yf_period_params(period)
-        df = yf.Ticker(ticker).history(**params)
+        df = get_history(ticker, period, "1h" if period == "1d" else "1d")
         return standardize_timezone(df)
     except Exception as e:
         print(_err("get_historical_data", e))
@@ -613,7 +576,7 @@ def get_analyst_data(ticker: str) -> dict:
             "target_high":    info.get("targetHighPrice"),
             "target_low":     info.get("targetLowPrice"),
             "target_median":  info.get("targetMedianPrice"),
-            "num_analysts":   info.get("numberOfAnalystOpinions", 0) or 0,
+            "num_analysts":   info.get("numberOfAnalystOpinions"),
             "recommendation": info.get("recommendationKey", "n/a"),
             "rec_mean":       info.get("recommendationMean"),
             "recs_df":        recs,
@@ -630,7 +593,8 @@ def get_social_sentiment(ticker: str) -> dict:
     StockTwits public API → bull/bear ratio → 0-100 score.
     Returns {score, bull_count, bear_count, total}.
     """
-    default = {"score": 50.0, "bull_count": 0, "bear_count": 0, "total": 0}
+    default = {"score": None, "bull_count": None, "bear_count": None, "total": None,
+               "status": "無數據"}
     try:
         url = f"https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
         r   = requests.get(
@@ -653,7 +617,9 @@ def get_social_sentiment(ticker: str) -> dict:
                m["entities"]["sentiment"].get("basic") == "Bearish"
         )
         tagged = bull + bear
-        score  = (bull / tagged * 100) if tagged > 0 else 50.0
+        score  = (bull / tagged * 100) if tagged > 0 else None
+        if score is None:
+            return default
         return {"score": round(score, 1), "bull_count": bull,
                 "bear_count": bear, "total": len(messages)}
     except Exception as e:
@@ -670,16 +636,19 @@ def get_news_sentiment_score(ticker: str) -> float:
     try:
         news = get_stock_news(ticker)
         if not news:
-            return 50.0
+            return None
         points = []
         for item in news:
-            text = (item.get("title", "") + " " + item.get("summary", "")).strip()
+            content = item.get("content") or item
+            text = (content.get("title", "") + " " + content.get("summary", "")).strip()
+            if not text:
+                continue
             s    = classify_sentiment(text)
             points.append(75.0 if s == "positive" else (25.0 if s == "negative" else 50.0))
-        return round(float(np.mean(points)), 1)
+        return round(float(np.mean(points)), 1) if points else None
     except Exception as e:
         print(_err("get_news_sentiment_score", e))
-        return 50.0
+        return None
 
 
 def get_combined_sentiment(ticker: str) -> dict:
@@ -690,7 +659,8 @@ def get_combined_sentiment(ticker: str) -> dict:
         news_score   = get_news_sentiment_score(ticker)
         social_data  = get_social_sentiment(ticker)
         social_score = social_data["score"]
-        combined     = round(news_score * 0.4 + social_score * 0.6, 1)
+        combined = (round(news_score * 0.4 + social_score * 0.6, 1)
+                    if news_score is not None and social_score is not None else None)
         return {
             "combined":     combined,
             "news_score":   news_score,
@@ -699,9 +669,10 @@ def get_combined_sentiment(ticker: str) -> dict:
         }
     except Exception as e:
         print(_err("get_combined_sentiment", e))
-        return {"combined": 50.0, "news_score": 50.0,
-                "social_score": 50.0,
-                "social_data": {"bull_count": 0, "bear_count": 0, "total": 0}}
+        return {"combined": None, "news_score": None,
+                "social_score": None,
+                "social_data": {"bull_count": None, "bear_count": None, "total": None,
+                                "status": "無數據"}}
 
 
 # ── VIX / benchmark ───────────────────────────────────────────────────────────
@@ -709,7 +680,7 @@ def get_combined_sentiment(ticker: str) -> dict:
 def get_vix_history(lookback: int = 63) -> pd.DataFrame:
     """Fetch ^VIX history for ~3 months; return DataFrame with Close renamed to VIX."""
     try:
-        hist = yf.Ticker("^VIX").history(period="3mo")
+        hist = yf.Ticker("^VIX").history(period="3mo", auto_adjust=True)
         if hist.empty:
             return pd.DataFrame()
         df = standardize_timezone(hist[["Close"]].copy()).rename(columns={"Close": "VIX"})
@@ -729,7 +700,7 @@ def get_market_benchmark(ticker: str, period: str = "1y") -> dict:
     short-period calls still succeed and return a valid ``hist`` and ``perf_1y``.
     """
     params = _yf_period_params(period)
-    hist   = yf.Ticker(ticker).history(**params)
+    hist   = yf.Ticker(ticker).history(**params, auto_adjust=True)
     if hist is None or hist.empty:
         raise RuntimeError(f"get_market_benchmark: no data returned for {ticker}")
     hist = standardize_timezone(hist)

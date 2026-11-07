@@ -80,13 +80,8 @@ def fetch_ohlcv(ticker: str, years: int) -> pd.DataFrame:
 def calc_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
     """Wilder's RSI."""
     try:
-        delta  = prices.diff()
-        gain   = delta.clip(lower=0)
-        loss   = (-delta).clip(lower=0)
-        avg_g  = gain.ewm(com=period - 1, min_periods=period).mean()
-        avg_l  = loss.ewm(com=period - 1, min_periods=period).mean()
-        rs     = avg_g / avg_l.replace(0, np.nan)
-        return (100 - 100 / (1 + rs)).rename("RSI")
+        from indicators import wilder_rsi
+        return wilder_rsi(prices, period)
     except Exception as e:
         print(_err("calc_rsi", e))
         return pd.Series(dtype=float)

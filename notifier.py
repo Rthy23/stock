@@ -311,7 +311,7 @@ def check_watchlist_alerts(
 
     for ticker in watchlist[:10]:   # cap at 10 to avoid rate limits
         try:
-            hist = _tz_strip(yf.Ticker(ticker).history(period="3mo"))
+            hist = _tz_strip(yf.Ticker(ticker).history(period="3mo", auto_adjust=True))
             if hist.empty or len(hist) < 20:
                 continue
             close   = hist["Close"]
@@ -551,9 +551,8 @@ def get_current_prices(tickers: list[str]) -> dict:
         import yfinance as yf
         for t in tickers:
             try:
-                h = _tz_strip(yf.Ticker(t).history(period="1d"))
-                if not h.empty:
-                    prices[t] = float(h["Close"].iloc[-1])
+                from market_data import get_quote
+                prices[t] = get_quote(t)["regular"]["price"]
             except Exception:
                 pass
     except Exception:

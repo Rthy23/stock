@@ -47,6 +47,9 @@ from ui_components import (
 import backtest_engine as be
 from mpf_assistant import render_mpf_page
 from kol_whitelist import render_kol_section
+from market_ui import render_market_header, render_quote_details, quote_label, fmt as market_fmt
+from screener_ui import render_screener
+from volume_panel import render_volume_panel
 from page_modules.sector_analysis import render_sector_analysis_page
 from page_modules.portfolio_allocation import render_portfolio_allocation_page
 from page_modules.global_markets import render_global_markets_page
@@ -311,6 +314,7 @@ def _inject_global_css() -> None:
 def main() -> None:
     init_session()
     _inject_global_css()
+    render_market_header()
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
     st.sidebar.title("📈 美股選股")
@@ -590,7 +594,7 @@ def main() -> None:
         _bm_loaded_at = beijing_timestamp()
         _bm_analysis_at = beijing_timestamp()
         st.caption(
-            f"⏱ 大盤資料載入：{_bm_loaded_at}｜分析完成：{_bm_analysis_at}"
+            f"⏱ 大盤畫面處理時間（可能使用快取，非來源時間）：{_bm_loaded_at}｜分析完成：{_bm_analysis_at}"
         )
 
     if bm.get("golden_cross") is True:
@@ -923,12 +927,16 @@ def main() -> None:
             st.info("👆 輸入股票代碼後按「診斷分析」，或在篩選結果中點擊代碼直接跳轉。")
 
         if stock_info:
-            price  = stock_info.get("price") or 0
+            price = (float(hist["Close"].iloc[-1]) if hist is not None and not hist.empty
+                     else stock_info.get("price"))
+            if price is None:
+                st.warning("行情與歷史價格資料不足，無法進行個股計算。")
+                return
             ticker = stock_info["ticker"]
             _diag_timing = st.session_state.get("diag_timing")
             if _diag_timing:
                 st.caption(
-                    f"⏱ 個股資料載入：{_diag_timing[0]}｜"
+                    f"⏱ 個股畫面處理時間（不是來源報價時間）：{_diag_timing[0]}｜"
                     f"分析完成：{_diag_timing[1]}"
                 )
 
@@ -936,7 +944,8 @@ def main() -> None:
             header_col, wl_col = st.columns([4, 1])
             with header_col:
                 st.markdown(f"## {stock_info['name']} ({ticker})")
-                st.caption(f"產業：{stock_info['sector']}　｜　目前股價：**${price:.2f}**")
+                st.caption(f"產業：{stock_info.get('sector', '資料不足')}　｜　分析用 adjusted close：${price:.2f}")
+                render_quote_details(ticker, stock_info.get("quote"))
             with wl_col:
                 st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
                 already_in_wl = ticker in st.session_state["watchlist"]
@@ -954,13 +963,22 @@ def main() -> None:
 
             # Key metrics
             m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
-            m1.metric("股價",     f"${price:.2f}")
+            m1.metric("正常時段報價", market_fmt(stock_info.get("price")))
+            m1.caption(quote_label(stock_info.get("quote")))
             m2.metric("市值",     format_market_cap(stock_info["market_cap"]))
-            m3.metric("P/E",      f"{stock_info['pe_ratio']:.1f}" if stock_info["pe_ratio"] else "N/A")
-            m4.metric("淨利率",   f"{stock_info['net_margin']*100:.1f}%" if stock_info["net_margin"] else "N/A")
-            m5.metric("營收增長", f"{stock_info['revenue_growth']*100:.1f}%" if stock_info["revenue_growth"] else "N/A")
-            m6.metric("EPS",      f"${stock_info['eps']:.2f}" if stock_info["eps"] else "N/A")
-            m7.metric("Beta",     f"{stock_info['beta']:.2f}" if stock_info["beta"] else "N/A")
+            m3.metric("P/E", market_fmt(stock_info.get("pe_ratio"), 1))
+            m4.metric("淨利率", market_fmt(stock_info["net_margin"]*100 if stock_info.get("net_margin") is not None else None, 1, "%"))
+            m4.caption(stock_info.get("margin_period", "財報期間資料不足"))
+            m5.metric("營收增長", market_fmt(stock_info["revenue_growth"]*100 if stock_info.get("revenue_growth") is not None else None, 1, "%"))
+            m5.caption(stock_info.get("growth_period", "財報期間資料不足"))
+            m6.metric("EPS", market_fmt(stock_info.get("eps")))
+            m6.caption(stock_info.get("eps_period", "財報期間資料不足"))
+            m7.metric("Beta", market_fmt(stock_info.get("beta")))
+            st.caption(f"基本面診斷快照；取得／快取回傳時間：{stock_info.get('received_at', '資料不足')} "
+                       "（非財報時間）。底層 15 分鐘快取；財報期間依 Yahoo 最近季度，未逐欄對帳。")
+            if hist is not None and not hist.empty:
+                st.caption(f"技術分析最後 K 棒：{hist.index[-1]}（區間日期，不是最後成交時間）；"
+                           f"歷史價格：{'快取' if hist.attrs.get('cache_hit') else '本次取得'}。")
 
             # ── [Moved] 歷史表現對比分析 now rendered via dynamic section loop below ─
 
@@ -981,9 +999,9 @@ def main() -> None:
 
             try:
                 _sent      = get_combined_sentiment("SPY")
-                _combined_q = _sent.get("combined", 50.0)
+                _combined_q = _sent.get("combined")
             except Exception:
-                _combined_q = 50.0
+                _combined_q = None
 
             _ad_q  = {}
             try:
@@ -992,7 +1010,7 @@ def main() -> None:
                 pass
             _quick_analysis_at = beijing_timestamp()
             st.caption(
-                f"⏱ 速查資料載入：{_quick_loaded_at}｜"
+                f"⏱ 速查取得／快取回傳時間（非來源時間）：{_quick_loaded_at}｜"
                 f"分析完成：{_quick_analysis_at}"
             )
             _rec_q    = (_ad_q.get("recommendation") or "").lower()
@@ -1010,7 +1028,8 @@ def main() -> None:
             else:
                 _a_label, _a_color, _a_delta = "計算中…", "#aaa", None
 
-            if   _combined_q >= 70: _s_color, _s_label = "#00FF7F", "極度貪婪"
+            if _combined_q is None: _s_color, _s_label = "#8B949E", "無數據"
+            elif _combined_q >= 70: _s_color, _s_label = "#00FF7F", "極度貪婪"
             elif _combined_q >= 50: _s_color, _s_label = "#7FFF00", "貪婪"
             elif _combined_q >= 30: _s_color, _s_label = "#FFD700", "中性"
             else:                   _s_color, _s_label = "#FF4B4B", "恐慌"
@@ -1027,7 +1046,7 @@ def main() -> None:
                 f"    <span style='color:#aaa; font-size:10px;'> ({_bm_ticker_q})</span></div>"
                 f"  <div><span style='color:#aaa; font-size:11px;'>情緒溫度</span><br>"
                 f"    <span style='color:{_s_color}; font-size:14px; font-weight:700;'>"
-                f"    {_combined_q:.0f}/100</span>"
+                f"    {market_fmt(_combined_q, 0)}/100</span>"
                 f"    <span style='color:{_s_color}; font-size:11px;'> {_s_label}</span>"
                 f"    <span style='color:#555; font-size:9px;'> ¹</span></div>"
                 f"  <div><span style='color:#aaa; font-size:11px;'>個股 Alpha (vs {_bm_ticker_q})</span><br>"
@@ -1051,7 +1070,7 @@ def main() -> None:
 
             # ── 融合訊號 ───────────────────────────────────────────────────────
             _buy_consensus = (_is_out_q is True)  and _is_buy_q
-            _oversold_warn = (_is_out_q is False) and (_combined_q < 30)
+            _oversold_warn = (_is_out_q is False) and (_combined_q is not None and _combined_q < 30)
             if _buy_consensus:
                 st.markdown(
                     "<div style='background:#0D2E1A; border:2px solid #238636; "
@@ -1186,40 +1205,7 @@ def main() -> None:
             # Section 3.5: Volume Momentum
             st.markdown("---")
             st.markdown("### 📊 成交量動能分析")
-            if hist is not None and not hist.empty:
-                try:
-                    vol_fig, vol_ratio, is_inst = plot_volume_chart(ticker, hist)
-                    avg20_val = hist["Volume"].rolling(20).mean().iloc[-1]
-                    if is_inst:
-                        st.markdown(
-                            f"<div style='background:#2D1B1B; border:1px solid #DA3633; "
-                            f"border-radius:7px; padding:9px 16px; margin-bottom:8px; font-size:13px; color:#E6EDF3;'>"
-                            f"⚠️ <b>機構級資金活動偵測</b>"
-                            f"　今日成交量為 20 日均量的 "
-                            f"<b>{vol_ratio:.1f}×</b>"
-                            f"，異常放量，建議密切關注方向性突破。</div>",
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        ratio_label = "高" if vol_ratio >= 1.2 else "正常"
-                        st.markdown(
-                            f"<div style='background:#1C2128; border-radius:7px; "
-                            f"padding:8px 16px; margin-bottom:8px; font-size:13px; color:#E6EDF3;'>"
-                            f"今日成交量為 20 日均量的 "
-                            f"<b>{vol_ratio:.2f}×</b>"
-                            f"　（均量：{avg20_val:,.0f}，成交{ratio_label}）</div>",
-                            unsafe_allow_html=True,
-                        )
-                    vm1, vm2, vm3 = st.columns(3)
-                    vm1.metric("今日成交量",      f"{hist['Volume'].iloc[-1]:,.0f}")
-                    vm2.metric("20 日均量",       f"{avg20_val:,.0f}")
-                    vm3.metric("量比（今 / 均）",
-                               f"{vol_ratio:.2f}×",
-                               delta="異常放量 ⚠️" if is_inst else "正常")
-                    st.plotly_chart(vol_fig, use_container_width=True,
-                                    key=f"vol_{ticker}")
-                except Exception:
-                    st.caption("⏳ 成交量數據載入失敗，請稍後再試。")
+            render_volume_panel(ticker)
 
             # Section 3.6: Sector ETF Correlation
             st.markdown("---")
@@ -1379,7 +1365,7 @@ def main() -> None:
                         hist_rs, bm_hist_rs, ticker, bm_ticker
                     )
                     st.caption(
-                        f"⏱ 相對強弱資料載入：{_rs_loaded_at}｜"
+                        f"⏱ 相對強弱取得／快取回傳時間（非來源時間）：{_rs_loaded_at}｜"
                         f"分析完成：{beijing_timestamp()}"
                     )
                     if rs_fig and alpha_pct is not None and stock_ret is not None:
@@ -1431,7 +1417,7 @@ def main() -> None:
                         st.warning("⚠️ 日期區間對齊資料不足，無法繪製比較圖。")
                 else:
                     st.caption(
-                        f"⏱ 相對強弱資料載入：{_rs_loaded_at}｜"
+                        f"⏱ 相對強弱取得／快取回傳時間（非來源時間）：{_rs_loaded_at}｜"
                         f"分析完成：{beijing_timestamp()}"
                     )
                     st.warning(f"⚠️ {bm_ticker} 基準數據暫時不可用，請稍後重試。")
@@ -1447,7 +1433,7 @@ def main() -> None:
                 _analyst_loaded_at = beijing_timestamp()
                 _analyst_analysis_at = beijing_timestamp()
                 st.caption(
-                    f"⏱ 分析師資料載入：{_analyst_loaded_at}｜"
+                    f"⏱ 分析師取得／快取回傳時間（非來源時間）：{_analyst_loaded_at}｜"
                     f"分析完成：{_analyst_analysis_at}"
                 )
                 if not ad:
@@ -1600,7 +1586,7 @@ def main() -> None:
                     st.plotly_chart(_fig_norm, use_container_width=True,
                                     key=f"norm_chart_{ticker}_{_sel_period}")
                     st.caption(
-                        f"⏱ 歷史／基準資料載入：{_comparison_loaded_at}｜"
+                        f"⏱ 歷史／基準取得／快取回傳時間（非來源時間）：{_comparison_loaded_at}｜"
                         f"分析完成：{beijing_timestamp()}"
                     )
                     st.markdown("**區間細分表現**")
@@ -1661,10 +1647,13 @@ def main() -> None:
                     )
                 _f7 = st.session_state.get(_f7_key)
                 if _f7:
+                    _period = (st.session_state.get(_f7_data_key) or {}).get("financial_period")
+                    st.caption(f"基本面最近季度：{_period or '資料不足'}；淨利率／EPS 為 TTM，"
+                               "營收成長為最近季度 YoY（Yahoo 口徑，未逐欄對帳）。")
                     _factor_timing = st.session_state.get(f"{_f7_key}_timing")
                     if _factor_timing:
                         st.caption(
-                            f"⏱ 因子資料載入：{_factor_timing[0]}｜"
+                            f"⏱ 因子取得／快取回傳時間（非來源時間）：{_factor_timing[0]}｜"
                             f"分析完成：{_factor_timing[1]}"
                         )
                     _comp   = _f7.get("composite", 0)
@@ -1896,7 +1885,7 @@ def main() -> None:
                                 if not _ph.empty:
                                     _pf_prices[_t] = float(_ph["Close"].iloc[-1])
                             except Exception:
-                                _pf_prices[_t] = _pf_data[_t].get("buy_price", 0)
+                                _pf_prices[_t] = None
                         _pf_ai_text = _call_gemini_portfolio_ai(_pf_data, _pf_prices, _pf_ai_key)
                     st.session_state["pf_ai_report"] = _pf_ai_text
                     st.rerun()
@@ -2782,6 +2771,9 @@ def main() -> None:
         # Tab 0 — Stock Screener (migrated from Macro page)
         # ──────────────────────────────────────────────────────────────────
         with tab0:
+            render_screener(params, navigate_to_diagnosis, save_watchlist)
+
+        def _archived_screener_view():
             st.markdown("### 🔍 優質美股篩選器")
             st.caption("根據自定義基本面條件，自動篩選符合條件的優質股票，並可一鍵送往回測引擎")
 

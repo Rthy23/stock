@@ -34,14 +34,14 @@ def _extract_close_frame(downloaded: pd.DataFrame, tickers: list[str]) -> pd.Dat
     return close.reindex(columns=[ticker for ticker in tickers if ticker in close.columns])
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_macro_indicators() -> dict[str, Any]:
     """Fetch ^TNX, ^VIX and SPY once per hour for allocation decisions."""
     tickers = ["^TNX", "^VIX", "SPY"]
     downloaded = yf.download(
         tickers=tickers,
         period="1y",
-        auto_adjust=False,
+        auto_adjust=True,
         progress=False,
         threads=False,
         group_by="column",
@@ -188,7 +188,7 @@ def render_portfolio_allocation_page() -> None:
     st.caption(
         "以 10Y Treasury Yield、VIX 與 SPY 200MA 建立透明的市場判定，"
         "再將資金動態拆分為美元定存／短債、美股核心 ETF、全球國際市場與精選美股個股。"
-        "資料每小時更新。"
+        "資料採 15 分鐘快取，開頁時檢查；使用 adjusted 歷史價格。"
     )
 
     try:
@@ -200,7 +200,7 @@ def render_portfolio_allocation_page() -> None:
         return
 
     st.caption(
-        f"⏱ 宏觀資料載入：{macro['loaded_at']}｜分析完成：{beijing_timestamp()}"
+        f"⏱ 宏觀取得／快取回傳時間（非行情來源時間）：{macro['loaded_at']}｜分析完成：{beijing_timestamp()}"
     )
     metric_cols = st.columns(4)
     metric_cols[0].metric("10年期美債收益率", f"{macro['tnx']:.2f}%")

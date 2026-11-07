@@ -4,6 +4,7 @@
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from indicators import wilder_rsi
 
 _MODULE = "analysis"
 
@@ -60,6 +61,8 @@ def screen_stocks(stocks_data: list, min_cap, min_margin, min_growth, max_pe) ->
         for stock in stocks_data:
             if stock is None:
                 continue
+            if any(stock.get(key) is None for key in ("market_cap", "net_margin", "revenue_growth", "pe_ratio")):
+                continue
             if (stock["market_cap"] > min_cap * 1_000_000_000
                     and stock["net_margin"] > min_margin / 100
                     and stock["revenue_growth"] > min_growth / 100
@@ -73,6 +76,8 @@ def screen_stocks(stocks_data: list, min_cap, min_margin, min_growth, max_pe) ->
 
 def format_market_cap(val: float) -> str:
     try:
+        if val is None or pd.isna(val):
+            return "資料不足"
         if val >= 1_000_000_000_000:
             return f"${val/1_000_000_000_000:.2f}T"
         if val >= 1_000_000_000:
@@ -164,6 +169,8 @@ def _vix_to_greed_score(vix: float) -> float:
 
 def _score_to_label(score: float) -> tuple:
     """Return (label_zh, color_hex) for a 0-100 greed score."""
+    if score is None:
+        return "無數據", "#8B949E"
     if score < 20:  return "極度恐慌", "#FF2D2D"
     if score < 40:  return "恐慌",     "#FF8C00"
     if score < 60:  return "中性",     "#FFD700"
@@ -525,6 +532,10 @@ def plot_four_quadrant(
 def plot_sentiment_gauge(score: float, title_prefix: str = "市場宏觀情緒") -> go.Figure:
     """Plotly Gauge: 0 = Extreme Fear, 100 = Extreme Greed."""
     try:
+        if score is None:
+            fig = go.Figure()
+            fig.add_annotation(text="無數據", showarrow=False)
+            return fig
         label, bar_color = _score_to_label(score)
         fig = go.Figure(go.Indicator(
             mode="gauge+number",
@@ -788,12 +799,13 @@ def calculate_seven_factors(
       }
     """
     fd = factor_data or {}
-    price = fd.get("price") or stock_info.get("price", 0)
+    price = (float(hist["Close"].iloc[-1]) if hist is not None and not hist.empty
+             else fd.get("price") or stock_info.get("price"))
 
     # ── Pre-compute momentum from hist ────────────────────────────────────
     m1 = m3 = m6 = m12 = None
-    rsi14 = 50.0
-    macd_sig = 0.0
+    rsi14 = None
+    macd_sig = None
     vol_30d = None
     max_dd = None
     atr_pct = None
@@ -814,11 +826,7 @@ def calculate_seven_factors(
         m12 = _pct(252) if n >= 252 else _pct(n)
 
         # RSI(14)
-        delta = close.diff()
-        gain  = delta.clip(lower=0).rolling(14).mean()
-        loss  = (-delta.clip(upper=0)).rolling(14).mean()
-        rs    = gain / loss.replace(0, np.nan)
-        rsi_s = 100 - 100 / (1 + rs)
+        rsi_s = wilder_rsi(close)
         if not rsi_s.empty:
             rsi14 = float(rsi_s.iloc[-1])
 
@@ -863,7 +871,7 @@ def calculate_seven_factors(
 
     def _fmt(v, suffix="", decimals=1, prefix=""):
         if v is None:
-            return "N/A"
+            return "資料不足"
         try:
             return f"{prefix}{v:.{decimals}f}{suffix}"
         except Exception:
@@ -876,7 +884,7 @@ def calculate_seven_factors(
         _item("6M 動量",   m6,      _fmt(m6, "%"),    "momentum_6m"),
         _item("12M 動量",  m12,     _fmt(m12, "%"),   "momentum_12m"),
         _item("RSI(14)",   rsi14,   _fmt(rsi14),      "rsi"),
-        _item("MACD 信號", macd_sig, "多頭" if macd_sig > 0 else ("空頭" if macd_sig < 0 else "中性"), "macd_signal"),
+        _item("MACD 信號", macd_sig, "資料不足" if macd_sig is None else ("多頭" if macd_sig > 0 else ("空頭" if macd_sig < 0 else "中性")), "macd_signal"),
     ]
 
     # ── 2. Value ──────────────────────────────────────────────────────────

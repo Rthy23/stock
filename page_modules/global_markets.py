@@ -113,7 +113,7 @@ def _close_frame(downloaded: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
     return close.reindex(columns=[ticker for ticker in tickers if ticker in close.columns])
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_global_performance(period: str = "1y") -> tuple[pd.DataFrame, float | None, str]:
     """Fetch international ETFs and SPY for *period* and compute total return.
 
@@ -124,7 +124,7 @@ def fetch_global_performance(period: str = "1y") -> tuple[pd.DataFrame, float | 
     tickers = GLOBAL_ETFS + ["SPY"]
     downloaded = yf.download(
         tickers=tickers,
-        auto_adjust=False,
+        auto_adjust=True,
         progress=False,
         threads=False,
         group_by="column",
@@ -159,7 +159,7 @@ def fetch_global_performance(period: str = "1y") -> tuple[pd.DataFrame, float | 
     return pd.DataFrame(rows), spy_return, beijing_timestamp()
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_all_etf_comparison(period: str = "1y") -> pd.DataFrame:
     """Fetch all region ETFs + SPY, normalize each series to 100 at first date.
 
@@ -169,7 +169,7 @@ def fetch_all_etf_comparison(period: str = "1y") -> pd.DataFrame:
     comparison_tickers = GLOBAL_ETFS + ["SPY"]
     downloaded = yf.download(
         tickers=comparison_tickers,
-        auto_adjust=False,
+        auto_adjust=True,
         progress=False,
         threads=False,
         group_by="column",
@@ -206,7 +206,7 @@ def fetch_all_etf_comparison(period: str = "1y") -> pd.DataFrame:
     return pd.concat(rows, ignore_index=True)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_market_history(ticker: str, period: str = "5y") -> pd.DataFrame:
     """Fetch one selected region ETF's historical Close series.
 
@@ -214,7 +214,7 @@ def fetch_market_history(ticker: str, period: str = "5y") -> pd.DataFrame:
     """
     downloaded = yf.download(
         tickers=[ticker],
-        auto_adjust=False,
+        auto_adjust=True,
         progress=False,
         threads=False,
         group_by="column",
@@ -235,7 +235,7 @@ def _news_field(item: dict[str, Any], field: str) -> Any:
     return item.get(field) or content.get(field)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_market_news(
     tickers: tuple[str, ...],
 ) -> tuple[pd.DataFrame, float]:
@@ -307,7 +307,7 @@ def render_global_markets_page() -> None:
     st.title("🌐 全球市場與美股 ADR 精選標的")
     st.caption(
         "追蹤台灣、日本、歐洲、全球與其他主要市場 ETF 的歷史走勢，"
-        "並從美股上市的 ADR／跨境企業白名單搭配新聞情緒尋找研究起點。資料每小時更新。"
+        "並從美股上市的 ADR／跨境企業白名單搭配新聞情緒尋找研究起點。資料採 15 分鐘快取，開頁時檢查。"
     )
 
     selected_rank_label = st.radio(
@@ -327,7 +327,7 @@ def render_global_markets_page() -> None:
         st.info("請稍後重新整理；Yahoo Finance 限流或資料不完整時不會使用假資料。")
         return
 
-    st.caption(f"⏱ 國際市場資料載入：{loaded_at}｜分析完成：{beijing_timestamp()}")
+    st.caption(f"⏱ 國際市場取得／快取回傳時間（非行情來源時間）：{loaded_at}｜分析完成：{beijing_timestamp()}")
 
     metric = "報酬率 (%)"
     sorted_df = performance_df.sort_values(metric, ascending=False).reset_index(drop=True)
