@@ -74,9 +74,12 @@ database; do not create tables at app startup or modify production schema
 directly. A previous local snapshot may be imported only after validation.
 The official CSV is fetched when the section is viewed (not by a background
 schedule); comparing holdings requires two saved, distinct official dates and
-valid CUSIP/share fields. If the database or source fails, show the problem,
-not fabricated holdings or a local-file fallback. The first published visit
-cannot retroactively reconstruct missing historic days.
+valid CUSIP/share fields. If the database fails, the official live CSV and an
+explicitly labelled last-success local public cache may still be displayed.
+Never imply that this local cache persists across republishing, or that displaying
+holdings means the production database has been provisioned. Keep the DB warning
+separate from source availability. Never fabricate dates or holdings.
+The first published visit cannot retroactively reconstruct missing historic days.
 
 ## Market-data integrity and refresh
 
@@ -93,9 +96,11 @@ remain None and must not appear as zero or synthetic neutral sentiment.
 Historical analysis/backtests use adjusted OHLC/close and the shared Wilder
 RSI implementation. Actual regular/pre/post execution quotes remain unadjusted
 and separated: adjusting a live trade price would misrepresent the market.
-NYSE calendar controls automatic quote requests, including holidays and early
-closes. A small status/countdown fragment continues to run outside market hours,
-but does not periodically request quotes. S&P 500 scans preserve source/coverage
+NYSE calendar controls market-state labels, including holidays and early closes.
+While a page is open, quotes refresh every 60 seconds in regular/pre/post sessions
+and every 300 seconds when closed/weekends; this is not a background scheduler.
+Off-hours source prices can legitimately retain the last trading date.
+S&P 500 scans preserve source/coverage
 and only refresh displayed quotes, not automatically rescan the whole index.
 Financial period labels based on Yahoo's mostRecentQuarter are explicitly
 approximate per-field attribution, not independently verified SEC periods.
@@ -111,6 +116,16 @@ Relative strength uses common adjusted daily intervals; VIX interpretation uses
 the preceding 252-session empirical percentile, not fixed VIX-level thresholds.
 The current-basics factor backtest has look-ahead bias and is labelled accordingly.
 Its cache namespace is separate from the earlier missing-as-zero scoring method.
+
+Public-source recovery lives in public_data_cache.py. Never cache credentials or
+request headers; .cache/public_sources is ignored by Git and publishing. Transient
+HTTP 429/5xx and connection failures retry with bounded backoff; 403 is not hammered.
+SEC, Yahoo analyst components, holder tables and publisher research feeds retain
+last-good results with source/report dates and original successful fetch times.
+Independent Yahoo components must not erase each other when one endpoint fails.
+Original demo KOL picks remain quarantined: the research reference section uses
+publisher-owned NY Fed/EIA/Federal Reserve feeds with original titles/links/dates,
+not invented or automatically attributed personal recommendations.
 
 Verification: `python -m unittest discover -p 'test_*.py'`; Streamlit interaction
 tests live alongside provider/clock/indicator fixtures. Do not publish fixtures

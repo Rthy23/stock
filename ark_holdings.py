@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import requests
+from public_data_cache import request_get
 
 from ark_snapshot_store import ArkStorageError, PostgresArkStore
 
@@ -111,11 +112,10 @@ def parse_holdings(content: bytes, *, today: datetime | None = None) -> dict:
 
 def fetch_holdings() -> dict:
     try:
-        response = requests.get(
+        response = request_get(
             SOURCE_URL, timeout=(5, 18),
             headers={"User-Agent": "US-stock-dashboard/1.0 (official public ARK holdings)"},
         )
-        response.raise_for_status()
     except requests.RequestException as exc:
         raise ArkHoldingsError(f"ARK 官方 CSV 連線失敗：{type(exc).__name__}。") from exc
     if urlparse(response.url).hostname != "assets.ark-funds.com":
@@ -152,7 +152,7 @@ def _write_json(path: Path, value: dict) -> None:
 
 
 class FileArkStore:
-    """Existing file-backed store, retained only for isolated tests and old imports."""
+    """Explicit local public-source cache; not a replacement for durable DB snapshots."""
 
     def __init__(self, directory: Path):
         self.directory = directory

@@ -594,15 +594,10 @@ def render_analyst_directory() -> None:
 
 
 def render_industry_commentary_reference() -> None:
-    """Only names are shown until a human source-checking process exists."""
+    """Original publisher references; quarantined attributed demo opinions stay hidden."""
     st.markdown("### 📰 產業評論參考")
-    st.info("此功能開發中，暫不提供")
-    st.write("、".join(
-        analyst["name"] for analyst in ANALYST_DIRECTORY if analyst["id"] in COMMENTARY_IDS
-    ))
-    # Reopening requires human entry, the actual statement date, a mandatory
-    # verifiable primary-source URL, and manual verification before publication.
-    # Do not use crawlers or AI-generated attributed opinions for this section.
+    from industry_sources import render_industry_references
+    render_industry_references()
 
 
 def render_kol_section(api_key: str = "") -> None:
@@ -612,9 +607,8 @@ def render_kol_section(api_key: str = "") -> None:
     st.markdown("### 📑 官方基金／機構持倉")
     render_sec_holdings()
     render_ark_holdings()
-    st.markdown("### 分析師推薦")
-    st.info("此功能開發中，暫不提供。剩餘四位示範來源缺少可核對的原始連結及發言日期；"
-            "歷史紀錄已隔離，不顯示名次、論點或 AI 摘要。")
+    from analyst_views import render_analyst_research
+    render_analyst_research("kol_official")
     render_industry_commentary_reference()
 
 

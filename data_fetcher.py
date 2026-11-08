@@ -561,28 +561,8 @@ def get_analyst_data(ticker: str) -> dict:
     Never raises — returns {} on failure.
     """
     try:
-        stock = yf.Ticker(ticker)
-        info  = stock.info
-        try:
-            recs = stock.recommendations
-            if recs is not None and not recs.empty:
-                recs = recs.tail(6).reset_index(drop=True)
-            else:
-                recs = None
-        except Exception:
-            recs = None
-
-        return {
-            "target_mean":    info.get("targetMeanPrice"),
-            "target_high":    info.get("targetHighPrice"),
-            "target_low":     info.get("targetLowPrice"),
-            "target_median":  info.get("targetMedianPrice"),
-            "num_analysts":   info.get("numberOfAnalystOpinions"),
-            "recommendation": info.get("recommendationKey", "n/a"),
-            "rec_mean":       info.get("recommendationMean"),
-            "recs_df":        recs,
-            "received_at": datetime.now(timezone.utc).isoformat(),
-        }
+        from analyst_sources import analyst_data
+        return analyst_data(ticker)
     except Exception as e:
         print(_err("get_analyst_data", e))
         return {}

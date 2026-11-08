@@ -393,8 +393,9 @@ def plot_analyst_recs(recs_df: pd.DataFrame) -> go.Figure:
         def _col(df, *names):
             for n in names:
                 if n in df.columns:
-                    return df[n].fillna(0).astype(int).tolist()
-            return [0] * len(df)
+                    return [int(v) if pd.notna(v) else None
+                            for v in pd.to_numeric(df[n], errors="coerce")]
+            return [None] * len(df)
 
         fig = go.Figure()
         fig.add_trace(go.Bar(name="強力買入", x=labels,

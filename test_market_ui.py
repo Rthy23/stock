@@ -8,16 +8,20 @@ from test_market_upgrade import quote
 
 
 class MarketUITests(unittest.TestCase):
-    def test_closed_session_no_automatic_quote_fetch(self):
+    def test_closed_session_refreshes_every_five_minutes(self):
         now = datetime.now(timezone.utc)
         status = {"label": "休市", "open": False, "now": now}
         app = AppTest.from_string("from market_ui import render_market_header\nrender_market_header()")
         app.session_state["quote_request_at"] = (now - timedelta(minutes=10)).isoformat()
-        with patch("market_ui.market_status", return_value=status), patch("market_ui._refresh") as refresh:
+        def fetched(tickers, force=False):
+            import streamlit as st
+            st.session_state["quote_request_at"] = now.isoformat()
+        with patch("market_ui.market_status", return_value=status), patch("market_ui._refresh", side_effect=fetched) as refresh:
             app.run()
         self.assertFalse(app.exception)
-        refresh.assert_not_called()
-        self.assertTrue(any("停止自動" in c.value for c in app.caption))
+        refresh.assert_called_once()
+        self.assertTrue(any("每 300 秒" in c.value for c in app.caption))
+        self.assertTrue(any("最新可用資料" in c.value for c in app.caption))
 
     def test_open_session_refreshes_then_countdown(self):
         now = datetime.now(timezone.utc)

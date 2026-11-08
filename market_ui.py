@@ -1,4 +1,4 @@
-"""Honest quote labels and a market-hours-only, 60-second quote refresh loop."""
+"""Honest source times and state-aware quote refresh while the page is open."""
 from datetime import datetime, timezone
 import math
 import streamlit as st
@@ -113,15 +113,19 @@ def render_market_header():
             _refresh(tickers, force=True)
         st.rerun()
     stamp = st.session_state.get("quote_request_at")
+    interval = 60 if state["label"] in ("盤中", "盤前", "盤後") else 300
     age = ((datetime.now(timezone.utc) - datetime.fromisoformat(stamp)).total_seconds()
-           if stamp else 60)
-    if tickers and ((state["open"] and age >= 60) or stamp is None):
+           if stamp else interval)
+    if tickers and (age >= interval or stamp is None):
         _refresh(tickers)
         st.rerun()
-    if state["open"] and tickers:
-        st.caption(f"報價自動刷新倒數：{max(0, 60-int(age))} 秒 · 僅刷新目前顯示股票")
-    else:
-        st.caption("非正常交易時段，已停止自動抓取報價；仍可立即刷新。")
+    if tickers:
+        st.caption(f"報價自動刷新倒數：{max(0, interval-int(age))} 秒 · "
+                   f"{state['label']}每 {interval} 秒請求目前顯示股票")
+    if not state["open"]:
+        st.caption("非正常交易時段：持續取得最新可用資料；休市時來源報價可能仍為最近交易日，"
+                   "抓取時間不代表有新成交。")
+    st.caption("自動更新只在頁面開啟時運行，並非無人值守背景排程；其他區塊依各自快取週期更新。")
     if stamp:
         st.caption(f"最後請求完成：{datetime.fromisoformat(stamp).astimezone(ET):%Y-%m-%d %H:%M:%S} ET"
                    "（不是報價來源時間）")

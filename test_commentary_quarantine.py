@@ -86,15 +86,13 @@ class CommentaryQuarantineTests(unittest.TestCase):
         self.assertEqual(result, [])
         ai.assert_not_called()
 
-    def test_placeholder_lists_names_only(self):
-        with patch("kol_whitelist.st") as ui:
+    def test_publisher_references_do_not_reactivate_attributed_demo_picks(self):
+        with patch("kol_whitelist.st") as ui, \
+             patch("industry_sources.render_industry_references") as references:
             render_industry_commentary_reference()
         self.assertIn("產業評論參考", ui.markdown.call_args.args[0])
-        self.assertIn("此功能開發中，暫不提供", ui.info.call_args.args[0])
-        displayed = ui.write.call_args.args[0]
-        self.assertIn("Dan Ives", displayed)
-        self.assertIn("Morningstar Quantitative Research", displayed)
-        self.assertNotIn("AAPL", displayed)
+        references.assert_called_once()
+        ui.write.assert_not_called()
 
     def test_sidebar_whitelist_cannot_reintroduce_commentary(self):
         with patch.object(user_config, "load_config", return_value={

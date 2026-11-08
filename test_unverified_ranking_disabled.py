@@ -13,6 +13,8 @@ class PublicSectionsTests(unittest.TestCase):
              patch("page_modules.analyst_consensus.render_sec_holdings") as sec, \
              patch("page_modules.analyst_consensus.render_ark_holdings") as ark, \
              patch("page_modules.analyst_consensus.render_industry_commentary_reference"), \
+             patch("analyst_views.render_analyst_research") as recommendations, \
+             patch("analyst_views.render_issuer_holders") as holders, \
              patch("page_modules.analyst_consensus._render_curated_consensus",
                    side_effect=AssertionError("example ranking called")), \
              patch("page_modules.analyst_consensus.fetch_market_recommendations",
@@ -23,7 +25,8 @@ class PublicSectionsTests(unittest.TestCase):
         ark.assert_called_once()
         self.assertIn("官方機構與基金持倉", ui.title.call_args.args[0])
         self.assertIn("不是即時選股訊號", ui.caption.call_args.args[0])
-        self.assertIn("暫不提供", ui.info.call_args.args[0])
+        recommendations.assert_called_once()
+        holders.assert_called_once()
         ui.error.assert_not_called()
         ui.plotly_chart.assert_not_called()
 
@@ -32,6 +35,7 @@ class PublicSectionsTests(unittest.TestCase):
              patch("page_modules.sec_holdings.render_sec_holdings") as sec, \
              patch("kol_whitelist.render_ark_holdings") as ark, \
              patch("kol_whitelist.render_industry_commentary_reference"), \
+             patch("analyst_views.render_analyst_research") as recommendations, \
              patch("kol_whitelist.build_consensus_table",
                    side_effect=AssertionError("example ranking called")), \
              patch("kol_whitelist.call_gemini_consensus",
@@ -40,7 +44,7 @@ class PublicSectionsTests(unittest.TestCase):
 
         sec.assert_called_once()
         ark.assert_called_once()
-        self.assertIn("暫不提供", ui.info.call_args.args[0])
+        recommendations.assert_called_once()
         ui.error.assert_not_called()
         ui.button.assert_not_called()
 

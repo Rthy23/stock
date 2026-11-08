@@ -9,14 +9,18 @@ import pandas as pd
 import streamlit as st
 
 from sec_edgar_fetcher import EdgarError, MANAGERS, fetch_manager, validate_user_agent
+from public_data_cache import last_success
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
 def _cached_manager(manager: tuple, _user_agent: str) -> dict:
-    return fetch_manager(manager, _user_agent)
+    cached = last_success("sec-manager:" + manager[2],
+                          lambda: fetch_manager(manager, _user_agent), ttl=86400)
+    return {**cached["data"], "cache_meta": {k: cached[k] for k in
+                                           ("fetched_at", "cache_hit", "stale", "error")}}
 
 
 def _rows(holdings: list[dict]) -> pd.DataFrame:
+    total = sum(h["value_reported"] for h in holdings)
     return pd.DataFrame([
         {
             "申報公司名稱": h["issuer"],
@@ -26,6 +30,7 @@ def _rows(holdings: list[dict]) -> pd.DataFrame:
             "申報數量": f'{h["quantity"]:,.0f}',
             "單位": h["unit"],
             "市值（申報原值）": f'{h["value_reported"]:,.0f}',
+            "占本期申報組合": f'{h["value_reported"]/total*100:.2f}%' if total else "資料不足",
         }
         for h in holdings
     ])
@@ -62,14 +67,8 @@ def render_sec_holdings() -> None:
         key="sec_13f_manager",
     )
     try:
-        agent = validate_user_agent(os.environ.get("SEC_USER_AGENT", ""))
-    except EdgarError as exc:
-        st.warning(f"SEC 資料暫不可用：{exc} 本區不會以模擬持倉替代。")
-        return
-
-    try:
         with st.spinner("正在核對 SEC 申報與持倉資訊…"):
-            result = _cached_manager(manager, agent)
+            result = _cached_manager(manager, os.environ.get("SEC_USER_AGENT", ""))
     except EdgarError as exc:
         st.warning(f"{manager[1]}：{exc} 不會以模擬資料替代。")
         return
@@ -79,6 +78,15 @@ def render_sec_holdings() -> None:
 
     current = result["current"]
     previous = result["previous"]
+    meta = result.get("cache_meta") or {}
+    if meta.get("stale"):
+        st.warning(f"SEC 本次讀取失敗：{meta['error']}；顯示最近成功快取，"
+                   f"截至 {current['report_date']}（取得 {meta['fetched_at']}）。")
+    st.caption(f"摘要：{result['sec_name']} · 截至 {current['report_date']} · "
+               f"{len(current['holdings'])} 種證券 · "
+               f"{'快取' if meta.get('cache_hit') else '本次取得'} · "
+               f"成功取得時間 {meta.get('fetched_at', result['fetched_at'])}。"
+               "比例為本期 13F 申報組合內占比，並非發行公司流通股占比。")
     try:
         days_since_report = (date.today() - date.fromisoformat(current["report_date"])).days
         if days_since_report > 180:
@@ -103,7 +111,19 @@ def render_sec_holdings() -> None:
         "市值欄保留申報原值，數量變化不等於實際買賣成交量。"
     )
     st.markdown(f"#### 本期持倉（{len(current['holdings'])} 種證券）")
-    st.dataframe(_rows(current["holdings"]), use_container_width=True, hide_index=True)
+    view = _rows(current["holdings"])
+    if previous:
+        changes = {(h["cusip"], h["class"], h["option"], h["unit"]): h
+                   for h in result["changes"]}
+        quantities = []
+        for h in current["holdings"]:
+            change = changes.get((h["cusip"], h["class"], h["option"], h["unit"]))
+            quantities.append(f'{change["quantity"] - change["previous_quantity"]:+,.0f}'
+                              if change else "—")
+        view["較上期數量變化"] = quantities
+    view["申報機構"] = result["sec_name"]
+    view["報告季末"] = current["report_date"]
+    st.dataframe(view, use_container_width=True, hide_index=True)
 
     if previous:
         st.markdown(

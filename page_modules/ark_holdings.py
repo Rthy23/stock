@@ -11,8 +11,30 @@ import pandas as pd
 import streamlit as st
 
 from ark_holdings import (
-    ArkHoldingsError, ArkStorageError, DOCUMENTS_URL, SOURCE_URL, get_ark_holdings,
+    ArkHoldingsError, ArkStorageError, DOCUMENTS_URL, SOURCE_URL, get_ark_holdings, FileArkStore,
 )
+from public_data_cache import CACHE_DIR
+
+
+def load_ark_view():
+    """A missing snapshot DB must not prevent displaying the official live CSV."""
+    local = FileArkStore(CACHE_DIR / "ark")
+    try:
+        result = get_ark_holdings()
+        # Keep a public last-good copy even if the DB becomes unavailable later.
+        for snapshot in (result.get("previous"), result.get("current")):
+            if snapshot:
+                local.save_snapshot(snapshot)
+        if result.get("checked_at"):
+            local.save_status({k: result.get(k) for k in
+                               ("checked_at", "error", "unchanged_on_refresh")})
+        result["storage_note"] = None
+    except ArkStorageError as exc:
+        result = get_ark_holdings(cache_dir=CACHE_DIR / "ark")
+        result["storage_note"] = (
+            f"跨重新發布快照儲存暫不可用：{exc} 下方仍顯示官方來源／本機最近成功快取；"
+            "本機快取不能保證跨重新發布保留，不代表持久化資料庫已修復。")
+    return result
 
 
 def _number(value: str | None, decimals: int = 0) -> str:
@@ -33,11 +55,13 @@ def render_ark_holdings() -> None:
     )
     st.markdown(f"[ARK 官方文件頁]({DOCUMENTS_URL}) · [原始 ARKK 持倉 CSV]({SOURCE_URL})")
     try:
-        result = get_ark_holdings()
+        result = load_ark_view()
     except (ArkHoldingsError, ArkStorageError, OSError) as exc:
         st.error(f"ARK 快照無法讀取或儲存：{exc} 不會以模擬資料替代。")
         return
     current = result["current"]
+    if result.get("storage_note"):
+        st.warning(result["storage_note"])
     if result["error"]:
         st.warning(
             f"ARK 官方來源問題：{result['error']}"
@@ -61,6 +85,9 @@ def render_ark_holdings() -> None:
         f"官方檔案所示持倉日期：**{current['date']}**｜"
         f"最近查詢 UTC：{result['checked_at'] or '—'}"
     )
+    st.caption(f"截至 {current['date']} · ARKK 共 {len(current['holdings'])} 筆官方持倉；"
+               f"組合權重合計 {sum(Decimal(h['weight_pct']) for h in current['holdings']):.2f}% · "
+               f"最近來源檢查 {result['checked_at'] or '未知'}；非即時持倉。")
     st.dataframe(pd.DataFrame([
         {
             "公司": h["company"], "Ticker": h["ticker"] or "—", "CUSIP": h["cusip"] or "—",

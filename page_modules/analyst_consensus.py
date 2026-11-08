@@ -453,14 +453,15 @@ def render_analyst_consensus_page() -> None:
     )
 
     render_sec_holdings()
+    from analyst_views import render_issuer_holders, render_analyst_research
+    with st.expander("發行公司機構持有人（Yahoo，非上述機構 13F）"):
+        render_issuer_holders()
     st.markdown("---")
     render_ark_holdings()
     st.markdown("---")
     render_industry_commentary_reference()
     st.markdown("---")
-    st.subheader("⭐ 分析師推薦")
-    st.info("此功能開發中，暫不提供。剩餘示範紀錄沒有可查核的原始來源與發言日期，"
-            "因此不展示共識排名、券商彙總排名、論點或 AI 推薦；請勿視為買股依據。")
+    render_analyst_research()
 
 
 # Compatibility entry point for direct Streamlit page execution.

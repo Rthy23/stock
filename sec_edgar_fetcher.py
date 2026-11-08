@@ -11,6 +11,7 @@ import time
 from xml.etree import ElementTree as ET
 
 import requests
+from public_data_cache import request_get
 
 
 # Verified against SEC filing index pages; re-check the submissions name at runtime.
@@ -53,11 +54,10 @@ def _get(url: str, user_agent: str) -> requests.Response:
             time.sleep(wait)
         _last_request = time.monotonic()
     try:
-        response = requests.get(
+        response = request_get(
             url, headers={"User-Agent": user_agent, "Accept-Encoding": "gzip, deflate"},
             timeout=(5, 20),
         )
-        response.raise_for_status()
         return response
     except requests.RequestException as exc:
         raise EdgarError(f"SEC 讀取失敗（{url}）：{exc}") from exc

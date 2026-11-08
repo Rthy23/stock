@@ -1501,12 +1501,8 @@ def main() -> None:
                     else:
                         st.caption("⏳ 目標價數據尚未公佈。")
 
-                    recs_df = ad.get("recs_df")
-                    if recs_df is not None and not recs_df.empty:
-                        st.plotly_chart(
-                            plot_analyst_recs(recs_df),
-                            use_container_width=True, key=f"ar_{ticker}",
-                        )
+                    from analyst_views import render_recommendation_details
+                    render_recommendation_details(ad, ticker, "micro")
             except Exception:
                 st.caption("⏳ 分析師數據暫時不可用，請稍後再試。")
 
