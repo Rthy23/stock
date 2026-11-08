@@ -73,7 +73,7 @@ def render_screener(params, navigate, save_watchlist):
     total = len(universe.get("symbols") or []) or len(records) + len(failures)
     coverage = len(records) / total * 100 if total else 0.
     partial = {r["ticker"]: r["partial_errors"] for r in records if r.get("partial_errors")}
-    st.info(f"掃描覆蓋率：{coverage:.2f}% · 成功 {len(records)} 支／失敗 {len(failures)} 支，共 {total} 支；"
+    st.info(f"抓取覆蓋率：{coverage:.2f}% · 成功 {len(records)} 支／失敗 {len(failures)} 支，共 {total} 支；"
             f"其中 {len(partial)} 支含缺失欄位。")
     st.caption(f"股票池來源：{universe.get('source', '資料不足')} · "
                "成分表取得時間不等於指數調整生效時間。")
@@ -96,6 +96,8 @@ def render_screener(params, navigate, save_watchlist):
     output = []
     for row in results:
         view = {"代碼": row["ticker"], "公司": row.get("name", "資料不足")}
+        valid_fields = sum(pd.notna(row.get(k)) for k in columns)
+        view["數據完整度（非預測可信率）"] = f"{valid_fields/len(columns):.0%}（{valid_fields}/{len(columns)}）"
         for key, label in columns.items():
             value = row.get(key)
             if key in ("net_margin", "revenue_growth") and value is not None:

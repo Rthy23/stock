@@ -981,6 +981,8 @@ def main() -> None:
                            f"歷史價格：{'快取' if hist.attrs.get('cache_hit') else '本次取得'}。")
 
             # ── [Moved] 歷史表現對比分析 now rendered via dynamic section loop below ─
+            from research_ui import render_stock_context
+            render_stock_context(ticker, stock_info, hist, "1h" if period == "1d" else "1d")
 
             # ── 決策速查表 ─────────────────────────────────────────────────────
             st.markdown("---")
@@ -1064,8 +1066,7 @@ def main() -> None:
             )
 
             st.caption(
-                "¹ 情緒溫度為自訂 VIX 簡化映射指數，非 CNN 官方 Fear & Greed Index。"
-                "VIX 數值透過線性映射轉為 0–100 分，高 VIX → 低分（恐慌），低 VIX → 高分（貪婪）。"
+                "¹ 情緒溫度為 SPY StockTwits 60%＋Yahoo 新聞 40%，非 CNN 官方指數，亦非 VIX 映射。"
             )
 
             # ── 融合訊號 ───────────────────────────────────────────────────────
@@ -1449,7 +1450,8 @@ def main() -> None:
                     }
                     r_label, r_color, r_bg = rec_map.get(
                         rec_key, ("中性 ★★★", "#aaa", "#1A1D2E"))
-                    num_a    = ad.get("num_analysts", 0) or 0
+                    num_a    = ad.get("num_analysts")
+                    num_a    = str(num_a) if num_a is not None else "—"
                     rec_mean = ad.get("rec_mean")
                     rm_text  = f"　評分：{rec_mean:.2f}/5.00" if rec_mean else ""
 
@@ -1474,28 +1476,28 @@ def main() -> None:
                     t_high = ad.get("target_high")
                     t_low  = ad.get("target_low")
                     t_med  = ad.get("target_median")
-                    if t_mean and t_high and t_low and t_low < t_high:
+                    st.caption("人數為 Yahoo 分析師意見數；Yahoo 未獨立提供目標價樣本數，兩者未必相同。"
+                               f"資料抓取時間（非報告日期）：{ad.get('received_at', '未知')}")
+                    if any(v is not None for v in (t_mean, t_high, t_low, t_med)):
                         tp_metrics = st.columns(4)
-                        tp_metrics[0].metric("目標低價",   f"${t_low:.2f}")
-                        tp_metrics[1].metric("目標中位數", f"${t_med:.2f}" if t_med else "N/A")
-                        tp_metrics[2].metric("目標均價",   f"${t_mean:.2f}")
-                        tp_metrics[3].metric("目標高價",   f"${t_high:.2f}")
-                        upside_pct = (t_mean - price) / price * 100 if price else 0
-                        upside_col = "#00FF7F" if upside_pct >= 0 else "#FF4B4B"
-                        st.markdown(
-                            f"<div style='background:#13162A; border-radius:7px; "
-                            f"padding:8px 16px; font-size:13px; margin:4px 0 8px;'>"
-                            f"距目標均價上行空間："
-                            f"<b style='color:{upside_col}; font-size:15px;'>"
-                            f"{upside_pct:+.1f}%</b>"
-                            f"　（現價 ${price:.2f} → 目標均 ${t_mean:.2f}）"
-                            f"</div>",
-                            unsafe_allow_html=True,
-                        )
-                        st.plotly_chart(
-                            plot_analyst_targets(price, t_low, t_mean, t_high, ticker),
-                            use_container_width=True, key=f"at_{ticker}",
-                        )
+                        for col, label, value in zip(tp_metrics,
+                                ["目標低價", "目標中位數", "目標均價", "目標高價"],
+                                [t_low, t_med, t_mean, t_high]):
+                            col.metric(label, f"${value:.2f}" if value is not None else "—")
+                        target_price = stock_info.get("price")
+                        if t_med is not None and t_med > 0 and target_price and target_price > 0:
+                            st.caption(f"距目標中位數上行空間：{(t_med / target_price - 1) * 100:+.1f}%"
+                                       f"（原始報價 ${target_price:.2f} → 中位數 ${t_med:.2f}）")
+                        else:
+                            st.caption("距目標中位數上行空間：資料不足")
+                        if t_low is not None and t_high is not None and t_high >= t_low:
+                            st.caption(f"目標價離散程度：最高－最低 ${t_high - t_low:.2f}；"
+                                       + (f"區間寬度／中位數 {(t_high-t_low)/t_med*100:.1f}%"
+                                          if t_med and t_med > 0 else "相對區間：資料不足"))
+                            if t_med is not None and target_price and t_low < t_high:
+                                st.plotly_chart(
+                                    plot_analyst_targets(target_price, t_low, t_med, t_high, ticker),
+                                    use_container_width=True, key=f"at_{ticker}")
                     else:
                         st.caption("⏳ 目標價數據尚未公佈。")
 
@@ -1629,6 +1631,7 @@ def main() -> None:
                     st.warning(f"無法載入 {ticker} 的 {_sel_period} 歷史數據。")
 
             def _section_factor_system():
+                from research_context import score_text
                 st.markdown("---")
                 st.markdown("### 📊 7-Factor 多因子分析系統")
                 _f7_key      = f"factor7_{ticker}"
@@ -1657,6 +1660,10 @@ def main() -> None:
                             f"分析完成：{_factor_timing[1]}"
                         )
                     _comp   = _f7.get("composite", 0)
+                    _comp_bar = _comp if _comp is not None else 0.
+                    st.caption(f"數據完整度：{_f7.get('completeness', 0):.0%}"
+                               f"（{_f7.get('valid_count', 0)}/{_f7.get('total_count', 0)} 有效細項）；"
+                               "僅代表欄位覆蓋，非預測可信概率。有效細項少於 50% 或有效因子少於 4 組：數據不足。")
                     _signal = _f7.get("signal", "HOLD")
                     _sig_colors = {
                         "STRONG BUY":  "#00FF7F", "BUY":  "#7CFC00",
@@ -1676,22 +1683,27 @@ def main() -> None:
                         f"<div style='color:#8B949E; font-size:12px; margin-top:2px;'>7-Factor Composite Score</div>"
                         f"</div>"
                         f"<div style='text-align:right;'>"
-                        f"<div style='font-size:48px; font-weight:700; color:{_sc};'>{_comp:+.2f}</div>"
+                        f"<div style='font-size:48px; font-weight:700; color:{_sc};'>{score_text(_comp)}</div>"
                         f"<div style='color:#8B949E; font-size:12px;'>Range: -5 to +5</div>"
                         f"<div style='width:180px; height:6px; background:#21262D; "
                         f"border-radius:3px; margin-top:6px; overflow:hidden;'>"
-                        f"<div style='width:{max(0,min(100,(_comp+5)/10*100)):.1f}%; "
+                        f"<div style='width:{max(0,min(100,(_comp_bar+5)/10*100)) if _comp is not None else 0:.1f}%; "
                         f"height:100%; background:{_sc}; border-radius:3px;'></div>"
                         f"</div></div></div></div>",
                         unsafe_allow_html=True,
                     )
                     st.caption(
-                        "綜合分數 = Momentum(20%) + Value(15%) + Quality(20%) + Growth(15%)"
-                        " + Volatility(10%) + Sentiment(10%) + Macro(10%)"
+                        "基準權重：動量 10%＋估值 15%＋品質 20%＋增長 20%＋波動 10%"
+                        "＋持倉與分析師共識 15%＋均線結構 10%；整組無數據則剔除並重新分配權重。"
                     )
+                    st.caption(f"總分技術輸入最後 K 棒：{_f7.get('input_time') or '未知'}；"
+                               f"基本面抓取時間（非來源發布時間）："
+                               f"{(st.session_state.get(_f7_data_key) or {}).get('received_at') or '未知'}；"
+                               "各來源時間及缺失詳見細項，未知時間不以本次計算時間代替。")
                     st.caption(
-                        "⚠️ 以上因子權重為人工設定，尚未經過歷史回測驗證其優劣，"
-                        "僅作研究參考框架，不代表嚴謹的量化模型。"
+                        "⚠️ 權重為人工研究設定，有限回測不代表實盤預測能力。"
+                        "持倉共識非新聞／StockTwits；均線結構不使用 VIX／利率。"
+                        "分析師評級僅計入持倉共識，Beta 僅計入波動，機構持股僅計入持倉共識。"
                     )
                     _fcol1, _fcol2 = st.columns([1, 1])
                     with _fcol1:
@@ -1704,6 +1716,9 @@ def main() -> None:
                             _fg  = _f7.get(_fk, {})
                             _flbl = _fg.get("label", _fk)
                             _fs  = _fg.get("score", 0.0)
+                            if _fs is None:
+                                st.caption(f"{_flbl}：無數據 · 權重 0%")
+                                continue
                             _fc  = "#00FF7F" if _fs >= 0 else "#FF4B4B"
                             _bwp = (_fs / 5) * 50
                             _bl  = "50%" if _fs >= 0 else f"{50+_bwp:.1f}%"
@@ -1723,39 +1738,44 @@ def main() -> None:
                                 f"</div></div>",
                                 unsafe_allow_html=True,
                             )
+                            st.caption(f"輸入時間：{_fg.get('input_time', '未知')}")
                     st.markdown("---")
 
                     def _ftbl(factor_key):
                         fg  = _f7.get(factor_key, {})
                         fs  = fg.get("score", 0.0)
-                        fc  = "#00FF7F" if fs >= 0 else "#FF4B4B"
+                        fc  = "#00FF7F" if fs is not None and fs >= 0 else "#8B949E"
                         lbl = fg.get("label", factor_key)
                         st.markdown(
                             f"<div style='display:flex;justify-content:space-between;"
                             f"align-items:baseline;margin-bottom:6px;'>"
                             f"<span style='font-weight:700;font-size:15px;color:#E6EDF3;'>{lbl}</span>"
-                            f"<span style='font-size:18px;font-weight:700;color:{fc};'>{fs:+.2f}</span>"
+                            f"<span style='font-size:18px;font-weight:700;color:{fc};'>{score_text(fs, missing='無數據')}</span>"
                             f"</div>",
                             unsafe_allow_html=True,
                         )
+                        st.caption(f"輸入時間：{fg.get('input_time', '未知')}")
                         tbl = (
                             "<table style='width:100%;border-collapse:collapse;font-size:12px;'>"
                             "<thead><tr style='color:#8B949E;border-bottom:1px solid #30363D;'>"
                             "<th style='text-align:left;padding:4px 6px;'>FACTOR 因子</th>"
                             "<th style='text-align:right;padding:4px 6px;'>VALUE 數值</th>"
                             "<th style='text-align:right;padding:4px 6px;'>SCORE 評分</th>"
+                            "<th style='text-align:right;padding:4px 6px;'>輸入時間／抓取時間</th>"
                             "</tr></thead><tbody>"
                         )
                         for itm in fg.get("items", []):
                             sc   = itm.get("score", 0.0)
-                            sc_c = "#00FF7F" if sc > 0 else ("#FF4B4B" if sc < 0 else "#8B949E")
+                            sc_c = "#00FF7F" if sc is not None and sc > 0 else ("#FF4B4B" if sc is not None and sc < 0 else "#8B949E")
                             tbl += (
                                 f"<tr style='border-bottom:1px solid #21262D;'>"
                                 f"<td style='padding:5px 6px;color:#C9D1D9;'>{itm['name']}</td>"
                                 f"<td style='padding:5px 6px;text-align:right;color:#8B949E;'>"
                                 f"{itm['value_str']}</td>"
                                 f"<td style='padding:5px 6px;text-align:right;"
-                                f"font-weight:700;color:{sc_c};'>{sc:+.1f}</td>"
+                                f"font-weight:700;color:{sc_c};'>{score_text(sc, 1, '缺失')}</td>"
+                                f"<td style='padding:5px 6px;color:#8B949E;'>{itm.get('input_time', '未知')}"
+                                f"<br>抓取（非來源）：{itm.get('fetched_at') or '未知'}</td>"
                                 f"</tr>"
                             )
                         tbl += "</tbody></table>"
@@ -1767,18 +1787,18 @@ def main() -> None:
 
                     st.markdown("**📋 因子細項明細（點擊展開）**")
                     _weights = {
-                        "Momentum": "20%", "Value": "15%", "Quality": "20%",
-                        "Growth": "15%", "Volatility": "10%", "Sentiment": "10%", "Macro": "10%",
+                        k: f"{_f7[k].get('effective_weight', 0):.1%}"
+                        for k in ["Momentum", "Value", "Quality", "Growth", "Volatility", "Sentiment", "Macro"]
                     }
                     for _fk in ["Momentum", "Value", "Quality", "Growth",
                                  "Volatility", "Sentiment", "Macro"]:
                         _fg_e  = _f7.get(_fk, {})
                         _fs_e  = _fg_e.get("score", 0.0)
-                        _fc_e  = "#00FF7F" if _fs_e >= 0 else "#FF4B4B"
+                        _fc_e  = "#00FF7F" if _fs_e is not None and _fs_e >= 0 else "#8B949E"
                         _lbl_e = _fg_e.get("label", _fk)
                         with st.expander(
                             f"{_lbl_e}　　"
-                            f"評分 **{_fs_e:+.2f}**　　權重 {_weights.get(_fk, '')}"
+                            f"評分 **{score_text(_fs_e, missing='無數據')}**　　有效權重 {_weights.get(_fk, '')}"
                         ):
                             _ftbl(_fk)
 
@@ -1971,6 +1991,7 @@ def main() -> None:
         # Tab — 七因子 Composite Score 快速回測
         # ──────────────────────────────────────────────────────────────────
         with tab_factor:
+            st.warning("因子回測將現時基本面套落歷史日期，存在前視偏差；歷史結果不等於實盤預測能力。")
             from backtest_factor import (
                 BACKTEST_STOCKS as _BT_STOCKS,
                 _SNAPSHOT_DATES as _BT_SNAPS,

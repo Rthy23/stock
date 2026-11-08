@@ -231,7 +231,10 @@ def get_sp500(force=False):
                 symbols = sorted(set(table["Symbol"].str.replace(".", "-", regex=False)))
                 if not 490 <= len(symbols) <= 520:
                     raise ValueError("成分數量無法核對")
-                return {"symbols": symbols, "source": label, "url": url}
+                sector_col = next((c for c in ("GICS Sector", "Sector") if c in table), None)
+                sectors = ({str(row["Symbol"]).replace(".", "-"): row[sector_col]
+                            for _, row in table.iterrows()} if sector_col else {})
+                return {"symbols": symbols, "sectors": sectors, "source": label, "url": url}
             except Exception:
                 continue
         raise ValueError("S&P 500 成分表無法取得；不會以舊的 93 支名單替代。")

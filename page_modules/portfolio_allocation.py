@@ -36,11 +36,11 @@ def _extract_close_frame(downloaded: pd.DataFrame, tickers: list[str]) -> pd.Dat
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_macro_indicators() -> dict[str, Any]:
-    """Fetch ^TNX, ^VIX and SPY once per hour for allocation decisions."""
+    """Fetch macro inputs with a 15-minute cache and preceding-year VIX percentile."""
     tickers = ["^TNX", "^VIX", "SPY"]
     downloaded = yf.download(
         tickers=tickers,
-        period="1y",
+        period="2y",
         auto_adjust=True,
         progress=False,
         threads=False,
@@ -56,12 +56,18 @@ def fetch_macro_indicators() -> dict[str, Any]:
         raise RuntimeError(f"宏觀市場資料不完整：{missing}")
 
     latest = close.iloc[-1]
+    from research_context import vix_percentile
+    percentile = vix_percentile(close["^VIX"]).iloc[-1]
+    if pd.isna(percentile):
+        raise RuntimeError("VIX 過去一年百分位資料不足；不會退回固定 VIX 門檻。")
     spy_ma200 = close["SPY"].rolling(200).mean().iloc[-1]
     if pd.isna(spy_ma200):
         raise RuntimeError("SPY 200MA 尚未有足夠的交易日資料。")
     return {
         "tnx": round(float(latest["^TNX"]), 2),
         "vix": round(float(latest["^VIX"]), 2),
+        "vix_percentile": float(percentile),
+        "source_time": str(close.index[-1]),
         "spy_price": round(float(latest["SPY"]), 2),
         "spy_ma200": round(float(spy_ma200), 2),
         "spy_above_ma200": bool(latest["SPY"] > spy_ma200),
@@ -77,16 +83,18 @@ def classify_market_risk(macro: dict[str, Any]) -> tuple[str, int, list[str]]:
     """Return a compact risk summary using the current macro inputs."""
     score = 0
     reasons: list[str] = []
-    vix = float(macro["vix"])
+    vix = macro.get("vix_percentile")
     spy_bull = bool(macro["spy_above_ma200"])
-    if vix < 15:
+    if vix is None:
+        reasons.append("VIX 過去一年百分位資料不足，不計入風險分數")
+    elif vix < 20:
         score += 1
-        reasons.append("VIX 低於 15，波動風險偏低")
-    elif vix > 25:
+        reasons.append("VIX 位於過去一年第 20 百分位以下，波動相對偏低")
+    elif vix > 80:
         score -= 1
-        reasons.append("VIX 高於 25，避險需求升溫")
+        reasons.append("VIX 位於過去一年第 80 百分位以上，避險需求相對升溫")
     else:
-        reasons.append("VIX 位於中性區間")
+        reasons.append("VIX 位於過去一年 20～80 百分位")
     if spy_bull:
         score += 1
         reasons.append("SPY 位於 200MA 之上")
@@ -106,10 +114,10 @@ def calculate_allocation(
     ``user_risk_profile`` is retained as an ignored compatibility argument
     for callers from the earlier three-asset version.
     """
-    vix = float(macro["vix"])
+    vix = macro.get("vix_percentile")
     spy_bull = bool(macro["spy_above_ma200"])
 
-    if vix > 25:
+    if vix is not None and vix > 80:
         regime = "高風險恐慌期 (High Risk / Offense Guard)"
         description = (
             "市場恐慌指數偏高，建議提高美元定存與短債比重；"
@@ -123,7 +131,7 @@ def calculate_allocation(
             "同時降低高波動個股。"
         )
         cash_pct, us_etf_pct, global_pct, stocks_pct = 35, 35, 15, 15
-    elif vix < 15 and spy_bull:
+    elif vix is not None and vix < 20 and spy_bull:
         regime = "多頭牛市期 (Bullish Risk-On)"
         description = (
             "全球風險偏好回升，提高美股個股與全球半導體／AI ADR，"
@@ -205,6 +213,7 @@ def render_portfolio_allocation_page() -> None:
     metric_cols = st.columns(4)
     metric_cols[0].metric("10年期美債收益率", f"{macro['tnx']:.2f}%")
     metric_cols[1].metric("VIX 恐慌指數", f"{macro['vix']:.2f}")
+    metric_cols[1].caption(f"過去一年百分位：{macro['vix_percentile']:.1f}% · 日線 {macro['source_time']}")
     metric_cols[2].metric("SPY 現價", f"${macro['spy_price']:.2f}")
     metric_cols[3].metric(
         "SPY 200MA 趨勢",

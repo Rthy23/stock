@@ -339,7 +339,7 @@ def plot_analyst_targets(
     current_price: float, t_low: float, t_mean: float,
     t_high: float, ticker: str,
 ) -> go.Figure:
-    """Horizontal bar: analyst target range with mean and current price lines."""
+    """Horizontal bar: analyst target range with median and current price lines."""
     try:
         fig = go.Figure()
         fig.add_trace(go.Bar(
@@ -352,7 +352,7 @@ def plot_analyst_targets(
         axis_min = min(current_price, t_low)  * 0.93
         axis_max = max(current_price, t_high) * 1.07
         fig.add_vline(x=t_mean, line_color="#FFD700", line_width=2,
-                      annotation_text=f"  均值 ${t_mean:.2f}",
+                      annotation_text=f"  中位數 ${t_mean:.2f}",
                       annotation_font=dict(color="#FFD700", size=11),
                       annotation_position="top")
         fig.add_vline(x=current_price, line_color="#fff", line_width=2, line_dash="dash",
@@ -363,7 +363,7 @@ def plot_analyst_targets(
         upside_color = "#00FF7F" if upside >= 0 else "#FF4B4B"
         fig.update_layout(
             title=dict(
-                text=(f"分析師目標價區間　上行空間 "
+                text=(f"分析師目標價區間　中位數上行空間 "
                       f"<span style='color:{upside_color}'>{upside:+.1f}%</span>"),
                 font=dict(size=12, color="#fff"),
             ),
@@ -432,11 +432,15 @@ def plot_analyst_recs(recs_df: pd.DataFrame) -> go.Figure:
 def plot_radar(stock_info: dict) -> go.Figure:
     """Pentagonal fundamental radar for a stock."""
     try:
-        pe_score     = max(0, min(100, (30 - stock_info["pe_ratio"]) / 30 * 100)) if stock_info["pe_ratio"] > 0 else 0
-        margin_score = min(100, stock_info["net_margin"] * 300)
-        growth_score = min(100, stock_info["revenue_growth"] * 200)
-        cap_score    = min(100, stock_info["market_cap"] / 2_000_000_000_000 * 100)
-        div_score    = min(100, (stock_info["dividend_yield"] or 0) * 2000)
+        from market_data import number
+        def mapped(key, transform):
+            value = number(stock_info.get(key))
+            return transform(value) if value is not None else None
+        pe_score = mapped("pe_ratio", lambda v: max(0, min(100, (30-v)/30*100)) if v > 0 else 0)
+        margin_score = mapped("net_margin", lambda v: min(100, v*300))
+        growth_score = mapped("revenue_growth", lambda v: min(100, v*200))
+        cap_score = mapped("market_cap", lambda v: min(100, v/2_000_000_000_000*100))
+        div_score = mapped("dividend_yield", lambda v: min(100, v*2000))
         fig = go.Figure(go.Scatterpolar(
             r=[pe_score, margin_score, growth_score, cap_score, div_score],
             theta=["本益比評分", "淨利率", "營收增長", "市值規模", "股息殖利率"],
@@ -1212,9 +1216,17 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-                if (sd.get("total") or 0) < 10:
+                st.caption(f"StockTwits 權重 60% · 有效標籤樣本 "
+                           f"{sd.get('tagged_count') if sd.get('tagged_count') is not None else '無數據'}；"
+                           f"來源時間範圍：{sd.get('source_time', '未知')}；"
+                           f"抓取時間（非來源）：{sd.get('received_at', '未知')}")
+                nd = sentiment.get("news_data") or {}
+                st.caption(f"Yahoo 新聞權重 40% · 樣本 {nd.get('sample_count', 0)} 篇；"
+                           f"來源時間範圍：{nd.get('source_time', '未知')}；"
+                           f"抓取時間（非來源）：{nd.get('received_at', '未知')}")
+                if (sd.get("tagged_count") or 0) < 10:
                     st.caption(
-                        f"⚠️ 社交情緒樣本數過少（{sd.get('total',0)} 則），"
+                        f"⚠️ 社交情緒有效標籤樣本少於 10 則（{sd.get('tagged_count', 0)} 則），"
                         "當前分數僅供參考，數據量不足以反映真實市場情緒。"
                     )
 
@@ -1229,6 +1241,14 @@ def render_macro_sentiment_dashboard(bm_data: dict | None = None) -> None:
                 use_container_width=True, key="fear_timeline",
             )
             _render_external_timing("VIX", _vix_loaded_at, beijing_timestamp())
+            st.caption("VIX 判讀＝過去 252 個交易日百分位；高百分位代表相對恐慌。"
+                       "圖中情緒分＝100－百分位，並非 SPY 新聞／StockTwits 綜合分。")
+            if not vix_df.empty and pd.notna(vix_df["percentile"].iloc[-1]):
+                st.caption(f"VIX 百分位：{vix_df['percentile'].iloc[-1]:.1f}% · "
+                           f"來源日線時間：{vix_df.index[-1]} · "
+                           f"抓取時間（非來源）：{vix_df.attrs.get('received_at', '未知')}")
+            from research_ui import render_market_context
+            render_market_context()
 
         st.markdown("---")
     except Exception as e:

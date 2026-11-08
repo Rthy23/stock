@@ -100,6 +100,18 @@ and only refresh displayed quotes, not automatically rescan the whole index.
 Financial period labels based on Yahoo's mostRecentQuarter are explicitly
 approximate per-field attribution, not independently verified SEC periods.
 
+Research scoring: missing factor inputs use None, while valid neutral zero scores
+remain in group means. Empty groups are excluded and remaining weights normalised.
+Suppress the composite and trading label below 50% valid items or four valid groups.
+Coverage is a field-completeness measure, never a predictive confidence probability.
+Analyst upside uses median targets; Yahoo opinion counts must not be presented as
+verified target-price sample counts. Historical Forward PE must come from actual
+Yahoo valuation observations, never be reconstructed from current forecast EPS.
+Relative strength uses common adjusted daily intervals; VIX interpretation uses
+the preceding 252-session empirical percentile, not fixed VIX-level thresholds.
+The current-basics factor backtest has look-ahead bias and is labelled accordingly.
+Its cache namespace is separate from the earlier missing-as-zero scoring method.
+
 Verification: `python -m unittest discover -p 'test_*.py'`; Streamlit interaction
 tests live alongside provider/clock/indicator fixtures. Do not publish fixtures
 or copy development ARK snapshot data to production.

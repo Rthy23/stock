@@ -161,10 +161,14 @@ def news_impact_summary(news_items: list) -> tuple:
 
 
 # ── VIX / sentiment scoring ────────────────────────────────────────────────────
-def _vix_to_greed_score(vix: float) -> float:
-    """Map VIX value to a 0-100 Greed score (low VIX = high greed)."""
-    score = 92 - (vix - 10) / 30 * 87
-    return round(max(5.0, min(95.0, score)), 1)
+def _vix_to_greed_score(vix: float, history=None) -> float | None:
+    """Only a full preceding-year reference can support a VIX percentile."""
+    if history is None or len(history) < 252 or not np.isfinite(vix):
+        return None
+    past = pd.Series(history).dropna().tail(252)
+    if len(past) < 252:
+        return None
+    return round(100 - ((past < vix).sum() + .5 * (past == vix).sum()) / 252 * 100, 1)
 
 
 def _score_to_label(score: float) -> tuple:
@@ -587,7 +591,7 @@ def plot_fear_timeline(vix_df: pd.DataFrame, macro_events: list) -> go.Figure:
                 x=0.5, y=0.5, showarrow=False, font={"color": "#aaa", "size": 14},
             )
         else:
-            greed_series = vix_df["VIX"].apply(_vix_to_greed_score)
+            greed_series = vix_df.get("greed", pd.Series(index=vix_df.index, dtype=float))
             for lo, hi, zone_color in [(0,20,"rgba(255,45,45,0.08)"),
                                         (20,40,"rgba(255,140,0,0.06)"),
                                         (40,60,"rgba(255,215,0,0.04)"),
@@ -597,7 +601,7 @@ def plot_fear_timeline(vix_df: pd.DataFrame, macro_events: list) -> go.Figure:
 
             fig.add_trace(go.Scatter(
                 x=vix_df.index, y=greed_series,
-                mode="lines+markers", name="市場貪婪/恐慌指數",
+                mode="lines+markers", name="100 − VIX 過去一年百分位",
                 line=dict(color="#00D4FF", width=2.5),
                 marker=dict(size=5, color="#00D4FF"),
                 hovertemplate="%{x|%m/%d}<br>情緒分：%{y:.0f}<br>VIX：%{customdata:.1f}<extra></extra>",
@@ -620,7 +624,7 @@ def plot_fear_timeline(vix_df: pd.DataFrame, macro_events: list) -> go.Figure:
                 try:
                     ev_ts    = pd.Timestamp(ev_date_str)
                     closest  = vix_df.iloc[(vix_df.index - ev_ts).abs().argsort()[:1]]
-                    ann_y    = _vix_to_greed_score(float(closest["VIX"].iloc[0]))
+                    ann_y    = float(greed_series.loc[closest.index[0]])
                 except Exception:
                     ann_y = 85
                 fig.add_annotation(
@@ -632,7 +636,7 @@ def plot_fear_timeline(vix_df: pd.DataFrame, macro_events: list) -> go.Figure:
                 )
 
         fig.update_layout(
-            title={"text": "📉 市場恐慌指數走勢（過去 3 個月）",
+            title={"text": "📉 VIX 過去一年百分位情緒走勢（100－百分位）",
                    "font": {"size": 14, "color": "#FFFFFF"}},
             xaxis=dict(showgrid=True, gridcolor="#1E2130", tickfont={"color": "#aaa"},
                        title=dict(text="日期", font={"color": "#aaa"})),
@@ -862,12 +866,26 @@ def calculate_seven_factors(
 
     # ── Helper to build item dict ─────────────────────────────────────────
     def _item(name, raw, fmt, metric):
-        s = calculate_factor_score(raw, metric) if raw is not None else 0.0
-        return {"name": name, "value_raw": raw, "value_str": fmt, "score": s}
+        valid = raw is not None and pd.notna(raw) and np.isfinite(float(raw))
+        technical = metric in {"momentum_1m", "momentum_3m", "momentum_6m",
+                               "momentum_12m", "rsi", "macd_signal",
+                               "vol_30d", "max_dd", "atr_pct"}
+        non_financial = {"beta", "short_pct", "inst_ownership", "insider_ownership",
+                         "analyst_consensus", "analyst_rating", "fwd_eps_growth"}
+        stamp = (str(hist.index[-1]) if technical and hist is not None and not hist.empty
+                 else "來源更新時間未知" if metric in non_financial
+                 else f"財報期間 {fd['financial_period']}（Yahoo 最近季度，未逐欄核實；非發布時間）"
+                 if fd.get("financial_period") else "來源時間未知")
+        return {"name": name, "value_raw": raw if valid else None,
+                "value_str": fmt if valid else "資料不足",
+                "score": calculate_factor_score(raw, metric) if valid else None,
+                "input_time": stamp,
+                "fetched_at": (hist.attrs.get("received_at") if technical and hist is not None
+                               else fd.get("received_at"))}
 
     def _mean_score(items):
-        scores = [i["score"] for i in items if i["score"] != 0.0]
-        return round(sum(scores) / len(scores), 2) if scores else 0.0
+        scores = [i["score"] for i in items if i["score"] is not None]
+        return round(sum(scores) / len(scores), 2) if scores else None
 
     def _fmt(v, suffix="", decimals=1, prefix=""):
         if v is None:
@@ -918,7 +936,6 @@ def calculate_seven_factors(
         _item("營收成長",       fd.get("rev_growth"),    _fmt(fd.get("rev_growth"), "%", 1),   "rev_growth"),
         _item("EPS 成長",       fd.get("eps_growth"),    _fmt(fd.get("eps_growth"), "%", 1),   "eps_growth"),
         _item("預期 EPS 成長",  fwd_eps_growth,          _fmt(fwd_eps_growth, "%", 1),         "fwd_eps_growth"),
-        _item("分析師評級",     rec_mean,                _fmt(rec_mean, "/5", 2),              "analyst_rating"),
     ]
 
     # ── 5. Volatility ─────────────────────────────────────────────────────
@@ -941,7 +958,7 @@ def calculate_seven_factors(
     # Use hist vs benchmark indicator (simplified — golden cross + 12M momentum signal)
     sma50_val  = None
     sma200_val = None
-    golden_cross_score = 0.0
+    golden_cross_score = None
     if hist is not None and not hist.empty:
         c = hist["Close"].dropna()
         if len(c) >= 50:
@@ -954,11 +971,8 @@ def calculate_seven_factors(
     macro_items = [
         _item("SMA50 vs SMA200",
               golden_cross_score,
-              "黃金交叉" if golden_cross_score > 0 else ("死亡交叉" if golden_cross_score < 0 else "N/A"),
+              "多頭排列" if golden_cross_score and golden_cross_score > 0 else ("空頭排列" if golden_cross_score else "資料不足"),
               "macd_signal"),
-        _item("12M 相對表現",  m12, _fmt(m12, "%"), "momentum_12m"),
-        _item("Beta 敏感度",   fd.get("beta"), _fmt(fd.get("beta"), "", 2), "beta"),
-        _item("機構認可度",    fd.get("inst_ownership"), _fmt(fd.get("inst_ownership"), "%", 1), "inst_ownership"),
     ]
 
     # ── Assemble groups ───────────────────────────────────────────────────
@@ -968,11 +982,17 @@ def calculate_seven_factors(
         "Quality":    {"label": "Quality 質量",     "items": qual_items},
         "Growth":     {"label": "Growth 成長",      "items": grow_items},
         "Volatility": {"label": "Volatility 波動性","items": vol_items},
-        "Sentiment":  {"label": "Sentiment 情緒",   "items": sent_items},
-        "Macro":      {"label": "Macro 宏觀",       "items": macro_items},
+        "Sentiment":  {"label": "持倉與分析師共識（非新聞情緒）", "items": sent_items},
+        "Macro":      {"label": "均線結構（非宏觀經濟）", "items": macro_items},
     }
     for k, g in groups.items():
         g["score"] = _mean_score(g["items"])
+        g["valid_count"] = sum(i["score"] is not None for i in g["items"])
+        g["total_count"] = len(g["items"])
+        g["status"] = "有效" if g["score"] is not None else "無數據"
+        g["input_time"] = "；".join(sorted({
+            i["input_time"] for i in g["items"] if i["score"] is not None
+        })) or "無有效輸入"
 
     # ── Composite score (weighted average) ────────────────────────────────
     # 權重調整紀錄（2026-08-16）：Walk-Forward 4 切分驗證（6/9/12/15 訓練期）
@@ -986,11 +1006,23 @@ def calculate_seven_factors(
         "Growth":   0.20, "Volatility": 0.10,
         "Sentiment": 0.15, "Macro": 0.10,
     }
-    composite = sum(groups[k]["score"] * w for k, w in weights.items())
-    composite  = round(composite, 2)
+    available_weight = sum(w for k, w in weights.items() if groups[k]["score"] is not None)
+    for k, g in groups.items():
+        g["effective_weight"] = weights[k] / available_weight if g["score"] is not None else 0.
+    valid_count = sum(g["valid_count"] for g in groups.values())
+    total_count = sum(g["total_count"] for g in groups.values())
+    completeness = valid_count / total_count
+    valid_groups = sum(g["score"] is not None for g in groups.values())
+    # Explicit conservative gate; completeness is not a statistical confidence level.
+    sufficient = completeness >= .5 and valid_groups >= 4
+    composite = (round(sum(g["score"] * g["effective_weight"]
+                           for g in groups.values() if g["score"] is not None), 2)
+                 if sufficient else None)
 
     # ── Signal label ──────────────────────────────────────────────────────
-    if composite >= 2.5:
+    if composite is None:
+        signal = "數據不足"
+    elif composite >= 2.5:
         signal = "STRONG BUY"
     elif composite >= 1.0:
         signal = "BUY"
@@ -1001,20 +1033,22 @@ def calculate_seven_factors(
     else:
         signal = "STRONG SELL"
 
-    return {**groups, "composite": composite, "signal": signal}
+    return {**groups, "composite": composite, "signal": signal,
+            "completeness": completeness, "valid_count": valid_count,
+            "total_count": total_count, "valid_groups": valid_groups,
+            "input_time": str(hist.index[-1]) if hist is not None and not hist.empty else None}
 
 
 def plot_factor_radar(factors: dict, ticker: str = "") -> go.Figure:
     """Return a Plotly radar chart for the 7 factor group scores."""
     try:
         factor_keys   = ["Momentum", "Value", "Quality", "Growth", "Volatility", "Sentiment", "Macro"]
-        factor_labels = ["Momentum 動量", "Value 估值", "Quality 質量",
-                         "Growth 成長", "Volatility 波動", "Sentiment 情緒", "Macro 宏觀"]
+        factor_labels = [factors.get(k, {}).get("label", k) for k in factor_keys]
         scores = [factors.get(k, {}).get("score", 0) for k in factor_keys]
         scores_closed = scores + [scores[0]]   # close the polygon
         labels_closed = factor_labels + [factor_labels[0]]
 
-        composite = factors.get("composite", 0)
+        composite = factors.get("composite") or 0
         line_color = "#00FF7F" if composite >= 0 else "#FF4B4B"
 
         fig = go.Figure()
@@ -1082,18 +1116,19 @@ def build_factor_prompt(ticker: str, name: str, factors: dict) -> str:
     lines = [
         f"你是一位資深量化投資分析師。請分析 {name}（{ticker}）的七大因子得分：",
         "",
-        f"【綜合評分】{comp:+.2f} / ±5.0　→ 評級：{signal}",
+        f"【綜合評分】{comp if comp is not None else '數據不足'} / ±5.0　→ 評級：{signal}",
+        "缺失值不是中性分數；數據不足時不得給買賣建議。",
         "",
     ]
     for key in ["Momentum", "Value", "Quality", "Growth", "Volatility", "Sentiment", "Macro"]:
         g = factors.get(key, {})
         g_score = g.get("score", 0)
         items_str = "，".join(
-            f"{i['name']} {i['value_str']}（{i['score']:+.1f}）"
+            f"{i['name']} {i['value_str']}（評分 {i['score']}；輸入時間 {i.get('input_time', '未知')}）"
             for i in g.get("items", [])
             if i.get("value_str") != "N/A"
         )
-        lines.append(f"【{g.get('label', key)}】得分 {g_score:+.2f} — {items_str}")
+        lines.append(f"【{g.get('label', key)}】得分 {g_score if g_score is not None else '無數據'} — {items_str}")
 
     lines += [
         "",

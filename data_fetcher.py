@@ -10,7 +10,7 @@ import json
 import os
 import base64
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from analysis import classify_sentiment
@@ -488,6 +488,7 @@ def get_factor_data(ticker: str) -> dict:
             return value * 100 if value is not None else None
 
         return {
+            "received_at": facts.get("received_at"),
             # Value
             "pe_ratio":          _f("trailingPE"),
             "pb_ratio":          _f("priceToBook"),
@@ -580,6 +581,7 @@ def get_analyst_data(ticker: str) -> dict:
             "recommendation": info.get("recommendationKey", "n/a"),
             "rec_mean":       info.get("recommendationMean"),
             "recs_df":        recs,
+            "received_at": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
         print(_err("get_analyst_data", e))
@@ -594,7 +596,8 @@ def get_social_sentiment(ticker: str) -> dict:
     Returns {score, bull_count, bear_count, total}.
     """
     default = {"score": None, "bull_count": None, "bear_count": None, "total": None,
-               "status": "無數據"}
+               "tagged_count": None, "source_time": "來源時間未知",
+               "received_at": datetime.now(timezone.utc).isoformat(), "status": "無數據"}
     try:
         url = f"https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
         r   = requests.get(
@@ -604,8 +607,6 @@ def get_social_sentiment(ticker: str) -> dict:
         if not r.ok:
             return default
         messages = r.json().get("messages", [])
-        if not messages:
-            return default
         bull = sum(
             1 for m in messages
             if (m.get("entities") or {}).get("sentiment", {}) and
@@ -618,26 +619,28 @@ def get_social_sentiment(ticker: str) -> dict:
         )
         tagged = bull + bear
         score  = (bull / tagged * 100) if tagged > 0 else None
-        if score is None:
-            return default
-        return {"score": round(score, 1), "bull_count": bull,
-                "bear_count": bear, "total": len(messages)}
+        from research_context import source_window
+        tagged_messages = [m for m in messages if
+                           ((m.get("entities") or {}).get("sentiment") or {}).get("basic")
+                           in ("Bullish", "Bearish")]
+        return {"score": round(score, 1) if score is not None else None, "bull_count": bull,
+                "bear_count": bear, "total": len(messages), "tagged_count": tagged,
+                "source_time": source_window([m.get("created_at") for m in tagged_messages]),
+                "received_at": datetime.now(timezone.utc).isoformat()}
     except Exception as e:
         print(_err("get_social_sentiment", e))
         return default
 
 
 @st.cache_data(ttl=900)
-def get_news_sentiment_score(ticker: str) -> float:
+def get_news_sentiment_details(ticker: str) -> dict:
     """
     Fetch stock news and run keyword sentiment.
     Returns 0-100 score (50 = neutral, >50 = bullish, <50 = bearish).
     """
     try:
         news = get_stock_news(ticker)
-        if not news:
-            return None
-        points = []
+        points, times = [], []
         for item in news:
             content = item.get("content") or item
             text = (content.get("title", "") + " " + content.get("summary", "")).strip()
@@ -645,10 +648,19 @@ def get_news_sentiment_score(ticker: str) -> float:
                 continue
             s    = classify_sentiment(text)
             points.append(75.0 if s == "positive" else (25.0 if s == "negative" else 50.0))
-        return round(float(np.mean(points)), 1) if points else None
+            times.append(content.get("pubDate") or content.get("providerPublishTime"))
+        from research_context import source_window
+        return {"score": round(float(np.mean(points)), 1) if points else None,
+                "sample_count": len(points), "source_time": source_window(times),
+                "received_at": datetime.now(timezone.utc).isoformat()}
     except Exception as e:
         print(_err("get_news_sentiment_score", e))
-        return None
+        return {"score": None, "sample_count": 0, "source_time": "來源時間未知",
+                "received_at": datetime.now(timezone.utc).isoformat()}
+
+
+def get_news_sentiment_score(ticker: str) -> float | None:
+    return get_news_sentiment_details(ticker)["score"]
 
 
 def get_combined_sentiment(ticker: str) -> dict:
@@ -656,7 +668,8 @@ def get_combined_sentiment(ticker: str) -> dict:
     Combine news (40%) + social (60%) into a single 0-100 composite score.
     """
     try:
-        news_score   = get_news_sentiment_score(ticker)
+        news_data    = get_news_sentiment_details(ticker)
+        news_score   = news_data["score"]
         social_data  = get_social_sentiment(ticker)
         social_score = social_data["score"]
         combined = (round(news_score * 0.4 + social_score * 0.6, 1)
@@ -664,6 +677,7 @@ def get_combined_sentiment(ticker: str) -> dict:
         return {
             "combined":     combined,
             "news_score":   news_score,
+            "news_data":    news_data,
             "social_score": social_score,
             "social_data":  social_data,
         }
@@ -677,13 +691,16 @@ def get_combined_sentiment(ticker: str) -> dict:
 
 # ── VIX / benchmark ───────────────────────────────────────────────────────────
 @st.cache_data(ttl=900)
-def get_vix_history(lookback: int = 63) -> pd.DataFrame:
-    """Fetch ^VIX history for ~3 months; return DataFrame with Close renamed to VIX."""
+def get_vix_history(lookback: int = 252) -> pd.DataFrame:
+    """One-year rolling empirical percentile; extra history warms up the window."""
     try:
-        hist = yf.Ticker("^VIX").history(period="3mo", auto_adjust=True)
+        hist = get_history("^VIX", "2y")
         if hist.empty:
             return pd.DataFrame()
         df = standardize_timezone(hist[["Close"]].copy()).rename(columns={"Close": "VIX"})
+        from research_context import vix_percentile
+        df["percentile"] = vix_percentile(df["VIX"])
+        df["greed"] = 100 - df["percentile"]
         return df.tail(lookback)
     except Exception as e:
         print(_err("get_vix_history", e))

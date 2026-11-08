@@ -83,9 +83,9 @@ _FETCH_START = date(2020, 6, 1)
 _FETCH_END   = date(2024, 11, 30)
 
 # 快取 / 進度路徑
-_CACHE_CSV     = "/tmp/factor_bt_cache.csv"
-_CACHE_META    = "/tmp/factor_bt_meta.json"
-_PROGRESS_FILE = "/tmp/factor_bt_progress.json"
+_CACHE_CSV     = "/tmp/factor_bt_available_inputs_cache.csv"
+_CACHE_META    = "/tmp/factor_bt_available_inputs_meta.json"
+_PROGRESS_FILE = "/tmp/factor_bt_available_inputs_progress.json"
 
 # 子因子名稱對應（用於相關係數表）
 _FACTOR_LABELS: dict[str, str] = {
@@ -94,8 +94,8 @@ _FACTOR_LABELS: dict[str, str] = {
     "Quality":    "Quality 質量",
     "Growth":     "Growth 成長",
     "Volatility": "Volatility 波動性",
-    "Sentiment":  "Sentiment 情緒",
-    "Macro":      "Macro 宏觀",
+    "Sentiment":  "持倉與分析師共識（非新聞情緒）",
+    "Macro":      "均線結構（非宏觀經濟）",
 }
 
 
@@ -566,12 +566,15 @@ def run_factor_backtest(
                         hist_slice,
                         fd,
                     )
-                    composite = float(factors.get("composite", 0.0))
+                    if factors.get("composite") is None:
+                        warnings.append(f"{ticker}@{snap_date}: 數據不足，排除此快照")
+                        continue
+                    composite = float(factors["composite"])
                     signal    = factors.get("signal", "HOLD")
                     sub_scores = {
                         f"score_{k.lower()}": round(float(factors[k]["score"]), 3)
                         for k in _FACTOR_LABELS
-                        if k in factors and isinstance(factors[k], dict)
+                        if k in factors and isinstance(factors[k], dict) and factors[k].get("score") is not None
                     }
                 except Exception as e:
                     warnings.append(f"{ticker}@{snap_date}: 因子計算失敗 — {e}")
