@@ -877,6 +877,7 @@ def calculate_seven_factors(
                  else f"財報期間 {fd['financial_period']}（Yahoo 最近季度，未逐欄核實；非發布時間）"
                  if fd.get("financial_period") else "來源時間未知")
         return {"name": name, "value_raw": raw if valid else None,
+                "metric": metric,
                 "value_str": fmt if valid else "資料不足",
                 "score": calculate_factor_score(raw, metric) if valid else None,
                 "input_time": stamp,

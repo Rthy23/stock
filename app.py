@@ -49,6 +49,7 @@ from mpf_assistant import render_mpf_page
 from kol_whitelist import render_kol_section
 from market_ui import render_market_header, render_quote_details, quote_label, fmt as market_fmt
 from screener_ui import render_screener
+from scientific_ui import render_scientific_panels, render_individual_trade, apply_reference_calibration, render_score_details
 from volume_panel import render_volume_panel
 from page_modules.sector_analysis import render_sector_analysis_page
 from page_modules.portfolio_allocation import render_portfolio_allocation_page
@@ -315,6 +316,7 @@ def main() -> None:
     init_session()
     _inject_global_css()
     render_market_header()
+    render_scientific_panels()
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
     st.sidebar.title("📈 美股選股")
@@ -946,6 +948,7 @@ def main() -> None:
                 st.markdown(f"## {stock_info['name']} ({ticker})")
                 st.caption(f"產業：{stock_info.get('sector', '資料不足')}　｜　分析用 adjusted close：${price:.2f}")
                 render_quote_details(ticker, stock_info.get("quote"))
+                render_individual_trade(ticker, hist, stock_info.get("quote"))
             with wl_col:
                 st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
                 already_in_wl = ticker in st.session_state["watchlist"]
@@ -1637,7 +1640,20 @@ def main() -> None:
                     with st.spinner(f"正在計算 {ticker} 七大因子…"):
                         _fd = get_factor_data(ticker)
                         _factor_loaded_at = beijing_timestamp()
-                        _f7 = calculate_seven_factors(stock_info, hist, _fd)
+                        _factor_hist = hist
+                        if hist is not None and len(hist)>1 and hist.index.to_series().diff().median() < pd.Timedelta(hours=12):
+                            try:
+                                from market_data import get_history
+                                _factor_hist = get_history(ticker)
+                            except Exception:
+                                _factor_hist = None
+                        _f7 = calculate_seven_factors(stock_info, _factor_hist, _fd)
+                        _f7 = apply_reference_calibration(ticker, _f7, stock_info.get("sector"))
+                        try:
+                            from scientific_ui import persist_individual_score
+                            persist_individual_score(ticker, _f7, _fd.get("received_at"))
+                        except Exception:
+                            st.warning("本次個股評分快照未能保存；不會列入新制歷史驗證。")
                         _factor_analysis_at = beijing_timestamp()
                     st.session_state[_f7_key]      = _f7
                     st.session_state[_f7_data_key] = _fd
@@ -1646,6 +1662,13 @@ def main() -> None:
                     )
                 _f7 = st.session_state.get(_f7_key)
                 if _f7:
+                    if _f7.get("method") == "sector-percentiles-v1":
+                        st.caption(f"已按掃描股票池校準；參照快照：{_f7.get('reference_time') or '本輪掃描'}")
+                        render_score_details({"ticker":ticker, "factors":_f7,
+                                              "factor_fetched_at":(st.session_state.get(_f7_data_key) or {}).get("received_at")})
+                    else:
+                        st.caption("目前為原有絕對刻度評分，未作橫截面校準：尚無可用同池參照。"
+                                   "完成全池掃描後重新計算即可校準；不列入新制因子效能驗證。")
                     _period = (st.session_state.get(_f7_data_key) or {}).get("financial_period")
                     st.caption(f"基本面最近季度：{_period or '資料不足'}；淨利率／EPS 為 TTM，"
                                "營收成長為最近季度 YoY（Yahoo 口徑，未逐欄對帳）。")

@@ -125,6 +125,7 @@ class YahooProvider:
             "post": {"price": number(info.get("postMarketPrice")),
                      "source_time": source_time(info.get("postMarketTime"))},
             "previous_close": previous,
+            "bid": number(info.get("bid")), "ask": number(info.get("ask")),
             "change_pct": ((regular / previous - 1) * 100
                            if previous is not None and previous > 0 else None),
             "volume": number(info.get("regularMarketVolume", fast.get("lastVolume"))),

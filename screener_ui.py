@@ -57,6 +57,16 @@ def render_screener(params, navigate, save_watchlist):
                 bar.progress(done/total)
                 status.write(f"分批掃描 {done}/{total} · {ticker}")
             records, failures = scan(universe["symbols"], progress)
+            from research_pipeline import score_records, persist_scan
+            status.write("校準七因子與計算交易參考…")
+            records, prices = score_records(records, universe, progress)
+            try:
+                saved = persist_scan(records, prices, universe, failures)
+                from scientific_ui import research_state
+                research_state.clear()
+                st.success(f"已保存前瞻評分快照：{saved}")
+            except Exception as exc:
+                st.warning(f"本次評分可顯示，但快照未保存（{type(exc).__name__}）；不會列入歷史驗證。")
             st.session_state["scan_records"] = records
             st.session_state["scan_failures"] = failures
             st.session_state["quote_request_at"] = None
@@ -65,6 +75,18 @@ def render_screener(params, navigate, save_watchlist):
         except Exception as exc:
             st.error(f"掃描失敗：{exc}")
     records = st.session_state.get("scan_records")
+    if records is None:
+        try:
+            from scientific_ui import research_state
+            saved = research_state()["latest"]
+            if saved:
+                members = set(saved["universe"]["symbols"])
+                records = [r for r in saved["records"] if r["ticker"] in members]
+                st.session_state.update(scan_records=records, scan_universe=saved["universe"],
+                                        scan_failures={t:e for t,e in saved["failures"].items() if t in members})
+                st.caption(f"已載入持久化最近掃描：{saved['time']}；各欄保留原數據時間。")
+        except Exception:
+            pass
     if records is None:
         st.info("按「開始掃描」讀取成分股；免費 Yahoo 完整掃描可能需要數分鐘。")
         return []
@@ -96,6 +118,13 @@ def render_screener(params, navigate, save_watchlist):
     output = []
     for row in results:
         view = {"代碼": row["ticker"], "公司": row.get("name", "資料不足")}
+        model = row.get("factors") or {}
+        if model:
+            view["固定權重校準總分"] = fmt(model.get("composite"))
+            view["IC加權綜合分（另列）"] = (fmt(model["ic_composite"]) if model.get("ic_composite") is not None
+                                          else "尚未驗證／效能未證實")
+            view["因子數據完整度"] = f"{model.get('completeness',0):.0%}"
+            view["因子訊號"] = model.get("signal", "數據不足")
         valid_fields = sum(pd.notna(row.get(k)) for k in columns)
         view["數據完整度（非預測可信率）"] = f"{valid_fields/len(columns):.0%}（{valid_fields}/{len(columns)}）"
         for key, label in columns.items():
@@ -112,6 +141,18 @@ def render_screener(params, navigate, save_watchlist):
                      "基本面快取": "快取／掃描快照" if row.get("received_at") else "資料不足"})
         output.append(view)
     st.dataframe(pd.DataFrame(output), hide_index=True, use_container_width=True)
+    from scientific_ui import render_score_details, render_trade_block
+    st.markdown("#### 交易計劃（參考）與因子貢獻")
+    capital_col, risk_col = st.columns(2)
+    capital = capital_col.number_input("參考資金（美元，套用本頁標的）", min_value=1.,
+                                      value=100000., key="scan_capital")
+    risk = risk_col.number_input("每筆風險（%，預設1%）", min_value=.01,
+                                max_value=100., value=1., key="scan_risk")
+    st.caption("每個標的獨立計算，並非可同時滿倉的組合建議；未計相關性與總組合風險。")
+    for row in results:
+        with st.expander(f"{row['ticker']} · 交易計劃（參考）／因子貢獻"):
+            render_trade_block(row["ticker"], row.get("trade_reference") or {}, capital, risk)
+            render_score_details(row)
     st.caption("量比＝盤中累積量 ÷（前 20 個完整交易日均量 × 今日交易時段已過比例）；"
                "以來源報價時刻計算；這是線性時間近似，未建模開收盤成交量曲線。"
                "K 棒時間是日期／區間起點，不代表當日最後成交時間。財報期間依 Yahoo 最近季度標示，未逐欄查核。")

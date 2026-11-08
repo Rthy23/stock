@@ -125,7 +125,8 @@ def render_market_header():
     if not state["open"]:
         st.caption("非正常交易時段：持續取得最新可用資料；休市時來源報價可能仍為最近交易日，"
                    "抓取時間不代表有新成交。")
-    st.caption("自動更新只在頁面開啟時運行，並非無人值守背景排程；其他區塊依各自快取週期更新。")
+    st.caption("此處的短週期報價刷新需開啟頁面；另有每小時的伺服器背景評分／情緒工作。"
+               "背景工作須伺服器持續運行，Autoscale可能休眠；實際完成時間見「最後背景更新」。")
     if stamp:
         st.caption(f"最後請求完成：{datetime.fromisoformat(stamp).astimezone(ET):%Y-%m-%d %H:%M:%S} ET"
                    "（不是報價來源時間）")
