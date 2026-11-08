@@ -72,6 +72,31 @@ class MarketUpgradeTests(unittest.TestCase):
             self.assertTrue(md.get_fundamentals("TEST")["cache_hit"])
             self.assertEqual(facts.call_count, 1)
 
+    def test_missing_quote_time_uses_original_fetch_time_and_fetch_age(self):
+        q = quote(None)
+        q["received_at"] = "2026-09-29T14:05:00+00:00"
+        q["cache_hit"] = True
+        text = quote_label(q, now=at("2026-09-29T14:07:00+00:00"))
+        self.assertIn("抓取時間 2026-09-29 10:05:00 ET（非報價時間）", text)
+        self.assertIn("距抓取 2 分鐘", text)
+        self.assertIn("快取", text)
+        self.assertIn("報價來源時間未知", text)
+        # Recent retrieval must never hide a stale genuine quote.
+        q["regular"]["source_time"] = "2026-09-29T14:00:00+00:00"
+        text = quote_label(q, now=at("2026-09-29T14:07:00+00:00"))
+        self.assertIn("報價時間", text)
+        self.assertIn("7 分鐘前", text)
+        self.assertIn("可能過期", text)
+        self.assertNotIn("抓取時間", text)
+
+    def test_cached_fallback_age_does_not_reset_on_read(self):
+        with patch.object(md.provider, "quote", return_value=quote(None)):
+            first = md.get_quote("TEST")
+            cached = md.get_quote("TEST")
+        self.assertEqual(first["received_at"], cached["received_at"])
+        now = datetime.fromisoformat(first["received_at"]) + timedelta(seconds=42)
+        self.assertIn("距抓取 42 秒", quote_label(cached, now=now))
+
     def test_failed_fetch_not_cached_or_replaced_by_zero(self):
         with patch.object(md.provider, "quote", side_effect=ValueError("no quote")) as fetch:
             for _ in range(2):

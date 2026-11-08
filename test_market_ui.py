@@ -61,6 +61,7 @@ class MarketUITests(unittest.TestCase):
             app.run()
             self.assertFalse(app.exception)
             self.assertTrue(any("成功 1 支／失敗 1 支" in v.value for v in app.info))
+            self.assertTrue(any("覆蓋率：50.00%" in v.value for v in app.info))
             self.assertEqual(app.dataframe[0].value.iloc[0]["Forward PE"], "資料不足")
             labels = [button.label for button in app.button]
             for label in ("個股診斷", "切換收藏", "送前五支到回測", "開始掃描 S&P 500"):

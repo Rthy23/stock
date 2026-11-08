@@ -84,7 +84,10 @@ Keep the Streamlit architecture and free data sources; do not require a paid
 API key. Route quotes/fundamentals/history through the replaceable provider
 contract in `market_data.py`. Quote cache is 60 seconds, fundamentals/history
 15 minutes. Live quote times must come from the source, never receipt/render
-times; if `fast_info` has no source timestamp, show unknown. Missing values
+times. If the source omits a quote timestamp, show the original fetch timestamp
+explicitly labelled "fetch time, not quote time", and age since that fetch;
+keep the quote's true age unknown. Reading the cache must not reset fetch age.
+Missing values
 remain None and must not appear as zero or synthetic neutral sentiment.
 
 Historical analysis/backtests use adjusted OHLC/close and the shared Wilder

@@ -18,17 +18,21 @@ def quote_label(quote, session="regular", now=None):
     part = (quote or {}).get(session, {})
     stamp = part.get("source_time")
     receipt = (quote or {}).get("received_at")
-    reused = bool(receipt and (datetime.now(timezone.utc) - datetime.fromisoformat(receipt)).total_seconds() > 2)
-    cached = " · 快取" if (quote or {}).get("cache_hit") or reused else ""
-    if not stamp:
-        return "報價來源時間資料不足 · 年齡未知" + cached
     now = now or datetime.now(timezone.utc)
-    source = datetime.fromisoformat(stamp)
+    reused = bool(receipt and (now - datetime.fromisoformat(receipt)).total_seconds() > 2)
+    cached = " · 快取" if (quote or {}).get("cache_hit") or reused else ""
+    if not stamp and not receipt:
+        return "報價來源時間資料不足 · 年齡未知" + cached
+    source = datetime.fromisoformat(stamp or receipt)
     seconds = (now - source).total_seconds()
     if seconds < -60:
-        return "來源時間異常 · 年齡未知" + cached
+        return ("來源時間異常" if stamp else "抓取時間異常") + " · 年齡未知" + cached
     age = max(0, int(seconds))
     text = f"{age} 秒前" if age < 60 else f"{age//60} 分鐘前"
+    if not stamp:
+        fetch_age = f"{age} 秒" if age < 60 else f"{age//60} 分鐘"
+        return (f"抓取時間 {source.astimezone(ET):%Y-%m-%d %H:%M:%S} ET（非報價時間）"
+                f" · 距抓取 {fetch_age} · 報價來源時間未知{cached}")
     stale = " · 可能過期" if market_status(now)["open"] and age > 300 else ""
     return f"報價時間 {source.astimezone(ET):%Y-%m-%d %H:%M:%S} ET · {text}{cached}{stale}"
 

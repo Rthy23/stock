@@ -70,9 +70,10 @@ def render_screener(params, navigate, save_watchlist):
         return []
     universe = st.session_state.get("scan_universe") or {}
     failures = st.session_state.get("scan_failures") or {}
-    total = len(records) + len(failures)
+    total = len(universe.get("symbols") or []) or len(records) + len(failures)
+    coverage = len(records) / total * 100 if total else 0.
     partial = {r["ticker"]: r["partial_errors"] for r in records if r.get("partial_errors")}
-    st.info(f"掃描覆蓋率：成功 {len(records)} 支／失敗 {len(failures)} 支，共 {total} 支；"
+    st.info(f"掃描覆蓋率：{coverage:.2f}% · 成功 {len(records)} 支／失敗 {len(failures)} 支，共 {total} 支；"
             f"其中 {len(partial)} 支含缺失欄位。")
     st.caption(f"股票池來源：{universe.get('source', '資料不足')} · "
                "成分表取得時間不等於指數調整生效時間。")
