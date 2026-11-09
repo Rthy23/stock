@@ -3,3 +3,4 @@
 - [Secret confirmation](secret-confirmation.md) — secure-form confirmation can preserve an invalid existing value; ask for an explicit overwrite when validation still fails.
 - [Validation regimes](prospective-factor-validation.md) — start a new scoring method identity when formulas change; never mix prior-regime evidence or reconstruct scores.
 - [Live build verification](deployment-verification.md) — verify public content separately; managed DB metadata alone does not establish DATABASE_URL connectivity.
+- [Publishing workflow](publishing-workflow.md) — user publishes this app through GitHub to Streamlit Cloud, not Replit.
