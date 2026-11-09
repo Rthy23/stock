@@ -174,11 +174,12 @@ or copy development ARK snapshot data to production.
 
 ## Deployment
 
-Configured for autoscale deployment on Replit.
+Configured for Reserved VM deployment on Replit, using `python run_dashboard.py`.
+This configuration takes effect only after the user republishes; changing it does not migrate the currently serving Autoscale deployment.
 
 ### Prospective scientific research
 
-- Launch with `python run_dashboard.py`: starts an independent scoring worker before Streamlit, no browser session required. Autoscale can still sleep; guaranteed unattended execution requires approved Reserved VM hosting or a separate scheduled worker.
+- Launch with `python run_dashboard.py`: starts an independent scoring worker before Streamlit, no browser session required. Reserved VM is selected for continuous hosting; verify the live deployment target and two successive background completions after publishing, rather than treating a development run as production evidence.
 - Scientific formulas, missing-data gates, validation sample thresholds, trade references and limitations: `docs/scientific-methods.md`.
 - User requirement: new factor validation starts only with newly observed, dated scores. Never backfill historical scores, reuse the old fundamental backtest as prospective evidence, or copy development test history into production.
 - Schema source: `schema/scientific_research.sql`, applied to development. No startup migrations; managed production schema changes go through Publish.

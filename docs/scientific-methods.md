@@ -87,6 +87,9 @@ VIX反向百分位是另一個指標，絕不偽裝為StockTwits／新聞綜合�
 開發資料表來源：schema/scientific_research.sql，已獨立套用開發庫。
 程式啟動不建表、不跑migration；Replit管理的正式結構由Publish套用。
 正式驗證應由正式站首次真實執行起算，勿選擇複製開發紀錄。
-Autoscale閒置會休眠，沒有24/7背景執行保證；
-需使用者批准Reserved VM並重新發布，或另行設定Scheduled Deployment
-執行`python -m research_worker --once`。此工作沒有自行發布或自動改成收費VM。
+Autoscale閒置會休眠，沒有24/7背景執行保證。
+使用者已要求常駐執行，發布設定改為Reserved VM，啟動命令仍為
+`python run_dashboard.py`；需使用者在Publishing重新發布才會套用，有常駐運算費用。
+修改設定不代表正式站已切換。發布後須核對正式部署類型、研究資料表與連線，
+並在沒有開頁觸發的情況下核對兩次約相隔一小時的背景成功時間及真實警報；
+開發庫紀錄不得作為正式驗證，亦不得複製進正式庫。
